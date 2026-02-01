@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+plan/
+.env
+.env.local
+dist/
+.netlify/
+.DS_Store
+Thumbs.db
