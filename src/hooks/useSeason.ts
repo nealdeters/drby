@@ -1,53 +1,53 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Racer, RaceEvent, Track } from '../gameTypes';
-
-const NAMES = ['Speedy', 'Zoomer', 'Dasher', 'Flash', 'Bolt', 'Turbo', 'Nitro', 'Drift', 'Apex', 'Redline', 'Mach', 'Vortex'];
-const COLORS = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33', '#FF33F3', '#33FFF3', '#FF8833', '#8833FF', '#FF3388', '#88FF33', '#3388FF', '#FFFFFF'];
-
-const TRACKS: Track[] = [
-  { id: 't1', name: 'Oval Circuit', surface: 'asphalt', length: 1000, laps: 3 },
-  { id: 't2', name: 'Dirt Derby', surface: 'dirt', length: 800, laps: 5 },
-  { id: 't3', name: 'Grasslands', surface: 'grass', length: 1200, laps: 2 },
-];
-
-const INITIAL_ROSTER: Racer[] = NAMES.map((name, i) => ({
-  id: `r-${i}`,
-  name,
-  color: COLORS[i],
-  baseSpeed: 40 + Math.random() * 20, // 40-60 m/s
-  health: 80 + Math.random() * 20,
-  strategy: Math.random() > 0.5 ? 'aggressive' : 'balanced',
-  trackPreference: TRACKS[Math.floor(Math.random() * TRACKS.length)].surface,
-  lane: 0,
-  progress: 0,
-  laps: 0,
-  totalDistance: 0,
-  status: 'waiting',
-  currentSpeed: 0,
-}));
+import { racersService } from '../services/racersService';
+import { tracksService } from '../services/tracksService';
 
 export const useSeason = () => {
-  const [roster, setRoster] = useState<Racer[]>(INITIAL_ROSTER);
+  const [roster, setRoster] = useState<Racer[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [schedule, setSchedule] = useState<RaceEvent[]>([]);
   const [standings, setStandings] = useState<Record<string, number>>({});
   const [nextRace, setNextRace] = useState<RaceEvent | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // Initialize Season / Schedule
   useEffect(() => {
+    const initData = async () => {
+      try {
+        const [fetchedRacers, fetchedTracks] = await Promise.all([
+          racersService.getAll(),
+          tracksService.getAll()
+        ]);
+
+        setRoster(fetchedRacers);
+        setTracks(fetchedTracks);
+        generateSchedule(fetchedRacers, fetchedTracks);
+      } catch (error) {
+        console.error("Failed to initialize season data", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initData();
+  }, []);
+
+  const generateSchedule = (currentRoster: Racer[], currentTracks: Track[]) => {
     const newSchedule: RaceEvent[] = [];
     const now = Date.now();
     // Schedule 10 races, 10 minutes apart
     for (let i = 0; i < 10; i++) {
       // Pick 3-12 random racers (Simulating racers choosing to race or rest)
       const numRacers = 3 + Math.floor(Math.random() * 10);
-      const shuffled = [...INITIAL_ROSTER].sort(() => 0.5 - Math.random());
+      const shuffled = [...currentRoster].sort(() => 0.5 - Math.random());
       const selectedIds = shuffled.slice(0, numRacers).map(r => r.id);
 
       newSchedule.push({
         id: `race-${i}`,
         startTime: now + (i * 10 * 60 * 1000) + 5000, // First race in 5s, then 10m intervals
         seed: Math.floor(Math.random() * 1000000), // In real app, this comes from DB/Blob
-        track: TRACKS[i % TRACKS.length],
+        track: currentTracks[i % currentTracks.length],
         racerIds: selectedIds,
         completed: false,
       });
@@ -57,9 +57,9 @@ export const useSeason = () => {
     
     // Init standings
     const initialStandings: Record<string, number> = {};
-    INITIAL_ROSTER.forEach(r => initialStandings[r.id] = 0);
+    currentRoster.forEach(r => initialStandings[r.id] = 0);
     setStandings(initialStandings);
-  }, []);
+  };
 
   const completeRace = useCallback((raceId: string, results: Racer[]) => {
     setSchedule(prev => {
@@ -100,5 +100,5 @@ export const useSeason = () => {
     }));
   }, []);
 
-  return { roster, schedule, standings, nextRace, completeRace, tracks: TRACKS };
+  return { roster, schedule, standings, nextRace, completeRace, tracks, loading };
 };

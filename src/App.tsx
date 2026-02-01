@@ -81,7 +81,7 @@ export default function App() {
       <View className="flex-row justify-between items-center px-6 py-6 bg-[#020617]" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 24, backgroundColor: '#020617' }}>
         <View>
           <Text className="text-3xl font-black italic text-white tracking-tighter" style={{ fontSize: 30, fontWeight: '900', fontStyle: 'italic', color: '#f8fafc', letterSpacing: -1 }}>DRBY<Text className="text-[#6366f1]" style={{ color: '#6366f1' }}>.</Text></Text>
-          <Text className="text-[#64748b] text-[10px] font-bold tracking-[0.2em] uppercase" style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold', letterSpacing: 3, textTransform: 'uppercase' }}>Racing League</Text>
+          {/* <Text className="text-[#64748b] text-[10px] font-bold tracking-[0.2em] uppercase" style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold', letterSpacing: 3, textTransform: 'uppercase' }}>Racing League</Text> */}
         </View>
         <View className="flex-row bg-[#0f172a] p-1.5 rounded-full" style={{ flexDirection: 'row', backgroundColor: '#0f172a', padding: 6, borderRadius: 999 }}>
           <TabButton title="Race" active={view === 'race'} onPress={() => setView('race')} />

@@ -1,17 +1,29 @@
 {
   "name": "drby",
   "version": "1.0.0",
+  "description": "Drby application",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "dev": "vite",
+    "dev:web": "vite",
+    "dev": "netlify dev",
     "build": "vite build",
-    "test": "jest"
+    "test": "jest",
+    "seed": "node src/scripts/seed-data.js"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "@netlify/functions": "^2.8.2",
     "buffer": "^6.0.3",
     "expo": "^54.0.32",
     "expo-status-bar": "^3.0.9",
@@ -34,19 +46,21 @@
     "@types/jest": "^30.0.0",
     "@types/react": "^19.2.10",
     "@types/react-native": "^0.73.0",
-    "@vitejs/plugin-react": "^5.1.2",
+    "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.24",
     "babel-jest": "^30.2.0",
+    "concurrently": "^9.2.1",
     "identity-obj-proxy": "^3.0.0",
     "jest": "^30.2.0",
     "jest-expo": "^54.0.16",
     "nativewind": "^4.2.1",
+    "netlify-cli": "^23.14.0",
     "postcss": "^8.5.6",
     "react-test-renderer": "^19.2.4",
     "tailwindcss": "^3.4.19",
     "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
     "typescript": "^5.1.3",
-    "vite": "^7.3.1"
-  },
-  "private": true
+    "vite": "^6.0.0"
+  }
 }

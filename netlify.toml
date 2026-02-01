@@ -1,0 +1,39 @@
+[build]
+  base = "/"
+  command = "npm run build"
+  publish = "dist"
+
+[dev]
+  command = "npm run dev:web"
+  publish = "dist"
+  targetPort = 5173
+
+[[redirects]]
+  from = "/api/races"
+  to = "/.netlify/functions/races"
+  status = 200
+
+[[redirects]]
+  from = "/api/races/*"
+  to = "/.netlify/functions/races"
+  status = 200
+
+[[redirects]]
+  from = "/api/tracks"
+  to = "/.netlify/functions/tracks"
+  status = 200
+
+[[redirects]]
+  from = "/api/tracks/*"
+  to = "/.netlify/functions/tracks"
+  status = 200
+
+[[redirects]]
+  from = "/api/racers"
+  to = "/.netlify/functions/racers"
+  status = 200
+
+[[redirects]]
+  from = "/api/racers/*"
+  to = "/.netlify/functions/racers"
+  status = 200

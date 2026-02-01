@@ -1,9 +1,6 @@
-# Dependencies
-node_modules/
-plan/
+# Local Netlify folder
+.netlify
+node_modules
+dist
+plan
 .env
-.env.local
-dist/
-.netlify/
-.DS_Store
-Thumbs.db
