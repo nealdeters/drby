@@ -67,13 +67,5 @@ export const RacerProfile = ({ stats, onBack }: RacerProfileProps) => (
             </View>
           </View>
         </View>
-        
-        <TouchableOpacity 
-          onPress={onBack}
-          className="mt-6 bg-[#6366f1] p-4 rounded-full items-center shadow-lg shadow-indigo-500/30"
-          style={{ marginTop: 24, backgroundColor: '#6366f1', padding: 16, borderRadius: 999, alignItems: 'center' }}
-        >
-          <Text className="text-white font-bold text-lg" style={{ color: 'white', fontWeight: 'bold', fontSize: 18 }}>Back to Roster</Text>
-        </TouchableOpacity>
       </View>
 );

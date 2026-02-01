@@ -1,13 +1,13 @@
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
-import { TabButton } from './TabButton';
+import { render, fireEvent } from '@testing-library/react';
+import { TabButton } from '../components/TabButton';
 
 describe('TabButton', () => {
   it('renders correctly', () => {
     const { getByText } = render(
       <TabButton title="Test Tab" active={false} onPress={() => {}} />
     );
-    expect(getByText('Test Tab')).toBeTruthy();
+    expect(getByText(/Test Tab/i)).toBeTruthy();
   });
 
   it('calls onPress when clicked', () => {
@@ -15,7 +15,7 @@ describe('TabButton', () => {
     const { getByText } = render(
       <TabButton title="Test Tab" active={false} onPress={onPress} />
     );
-    fireEvent.press(getByText('Test Tab'));
+    fireEvent.click(getByText(/Test Tab/i));
     expect(onPress).toHaveBeenCalled();
   });
 });
