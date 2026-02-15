@@ -154,7 +154,7 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
         />
         
         {/* Start/Finish Line */}
-        <G rotation={0} origin={`${CX}, ${CY}`}>
+        <G transform={`rotate(0, ${CX}, ${CY})`}>
            {/* Checkered Line */}
            <Line x1={CX} y1={CY - R_BASE + 10} x2={CX} y2={CY - R_BASE - 150} stroke="rgba(255,255,255,0.5)" strokeWidth={4} strokeDasharray="4,4" />
            {/* Finish Post */}

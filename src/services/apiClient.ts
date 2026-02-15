@@ -1,10 +1,10 @@
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import * as Ably from 'ably';
 
 export const getBaseUrl = () => {
   // 1. If running in production (Netlify), use the relative path or absolute URL
   if (!__DEV__) {
-    return 'https://your-site-name.netlify.app';
+    return 'https://drby-live.netlify.app';
   }
 
   // 2. If running locally
@@ -24,4 +24,23 @@ export const API_URL = `${getBaseUrl()}/.netlify/functions`; // Direct function 
 
 export const headers = {
   'Content-Type': 'application/json',
+  'x-api-key': process.env.API_KEY || '',
+};
+
+// Ably Realtime client (for WebSocket connections)
+let ablyClient: Ably.Realtime | null = null;
+
+export const getAblyClient = () => {
+  if (!ablyClient && process.env.ABLY_API_KEY) {
+    ablyClient = new Ably.Realtime(process.env.ABLY_API_KEY);
+  }
+  return ablyClient;
+};
+
+export const getRaceChannel = (raceId: string) => {
+  const client = getAblyClient();
+  if (!client) {
+    throw new Error('Ably client not initialized - ABLY_API_KEY not configured');
+  }
+  return client.channels.get(`race:${raceId}`);
 };

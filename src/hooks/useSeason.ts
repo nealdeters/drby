@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { Racer, RaceEvent, Track } from '../gameTypes';
 import { racersService } from '../services/racersService';
 import { tracksService } from '../services/tracksService';
+import { racesService } from '../services/racesService';
+
+const STORAGE_KEY = 'season-schedule';
 
 export const useSeason = () => {
   const [roster, setRoster] = useState<Racer[]>([]);
@@ -15,14 +18,35 @@ export const useSeason = () => {
   useEffect(() => {
     const initData = async () => {
       try {
-        const [fetchedRacers, fetchedTracks] = await Promise.all([
+        const [fetchedRacers, fetchedTracks, savedSchedule, savedStandings] = await Promise.all([
           racersService.getAll(),
-          tracksService.getAll()
+          tracksService.getAll(),
+          racesService.getSeasonSchedule().catch(() => null),
+          racesService.getStandings().catch(() => null)
         ]);
 
         setRoster(fetchedRacers);
         setTracks(fetchedTracks);
-        generateSchedule(fetchedRacers, fetchedTracks);
+        
+        // Init standings - use saved if available, otherwise all zeros
+        const initialStandings: Record<string, number> = {};
+        fetchedRacers.forEach(r => {
+          initialStandings[r.id] = savedStandings?.[r.id] || 0;
+        });
+        setStandings(initialStandings);
+        console.log('🏆 Loaded standings:', initialStandings);
+
+        // Check if we have a saved schedule that's still valid
+        if (savedSchedule && savedSchedule.length > 0) {
+          // Restore saved schedule
+          setSchedule(savedSchedule);
+          const next = savedSchedule.find(r => !r.completed);
+          setNextRace(next || null);
+          console.log('📅 Restored saved schedule with', savedSchedule.length, 'races');
+        } else {
+          // Generate new schedule
+          generateSchedule(fetchedRacers, fetchedTracks);
+        }
       } catch (error) {
         console.error("Failed to initialize season data", error);
       } finally {
@@ -33,7 +57,25 @@ export const useSeason = () => {
     initData();
   }, []);
 
-  const generateSchedule = (currentRoster: Racer[], currentTracks: Track[]) => {
+  // Save schedule to Blobs whenever it changes
+  useEffect(() => {
+    if (schedule.length > 0) {
+      racesService.saveSeasonSchedule(schedule).catch(err => 
+        console.error('Failed to save schedule:', err)
+      );
+    }
+  }, [schedule]);
+
+  // Save standings to Blobs whenever they change
+  useEffect(() => {
+    if (Object.keys(standings).length > 0) {
+      racesService.saveStandings(standings).catch(err => 
+        console.error('Failed to save standings:', err)
+      );
+    }
+  }, [standings]);
+
+  const generateSchedule = async (currentRoster: Racer[], currentTracks: Track[]) => {
     const newSchedule: RaceEvent[] = [];
     const now = Date.now();
     // Schedule 10 races, 10 minutes apart
@@ -46,7 +88,7 @@ export const useSeason = () => {
       newSchedule.push({
         id: `race-${i}`,
         startTime: now + (i * 10 * 60 * 1000) + 5000, // First race in 5s, then 10m intervals
-        seed: Math.floor(Math.random() * 1000000), // In real app, this comes from DB/Blob
+        seed: Math.floor(Math.random() * 1000000),
         track: currentTracks[i % currentTracks.length],
         racerIds: selectedIds,
         completed: false,
@@ -55,13 +97,15 @@ export const useSeason = () => {
     setSchedule(newSchedule);
     setNextRace(newSchedule[0]);
     
-    // Init standings
-    const initialStandings: Record<string, number> = {};
-    currentRoster.forEach(r => initialStandings[r.id] = 0);
-    setStandings(initialStandings);
+    // Save the new schedule
+    await racesService.saveSeasonSchedule(newSchedule);
+    console.log('📅 Generated new schedule with', newSchedule.length, 'races');
   };
 
   const completeRace = useCallback((raceId: string, results: Racer[]) => {
+    console.log('🏁 Completing race:', raceId);
+    console.log('📊 Race results:', results.map((r, i) => `${i + 1}. ${r.name} (${r.id})`));
+    
     setSchedule(prev => {
       const idx = prev.findIndex(r => r.id === raceId);
       if (idx === -1) return prev;
@@ -79,9 +123,19 @@ export const useSeason = () => {
     // Update Standings (5, 3, 1 points)
     setStandings(prev => {
       const newStandings = { ...prev };
-      if (results[0]) newStandings[results[0].id] = (newStandings[results[0].id] || 0) + 5;
-      if (results[1]) newStandings[results[1].id] = (newStandings[results[1].id] || 0) + 3;
-      if (results[2]) newStandings[results[2].id] = (newStandings[results[2].id] || 0) + 1;
+      if (results[0]) {
+        newStandings[results[0].id] = (newStandings[results[0].id] || 0) + 5;
+        console.log(`🥇 Added 5 points to ${results[0].name}, total: ${newStandings[results[0].id]}`);
+      }
+      if (results[1]) {
+        newStandings[results[1].id] = (newStandings[results[1].id] || 0) + 3;
+        console.log(`🥈 Added 3 points to ${results[1].name}, total: ${newStandings[results[1].id]}`);
+      }
+      if (results[2]) {
+        newStandings[results[2].id] = (newStandings[results[2].id] || 0) + 1;
+        console.log(`🥉 Added 1 point to ${results[2].name}, total: ${newStandings[results[2].id]}`);
+      }
+      console.log('📊 Updated standings:', newStandings);
       return newStandings;
     });
 

@@ -32,7 +32,8 @@ export default defineConfig({
   },
   define: {
     global: 'window',
-    'process.env': {},
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY),
+    'process.env.ABLY_API_KEY': JSON.stringify(process.env.ABLY_API_KEY),
     __DEV__: JSON.stringify(process.env.NODE_ENV !== 'production'),
   },
   optimizeDeps: {

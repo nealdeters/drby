@@ -1,6 +1,6 @@
 import './polyfills';
 import './index.css';
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, FlatList, Text, SafeAreaView, TouchableOpacity, StatusBar } from 'react-native';
 import { RaceTrack } from './components/RaceTrack';
 import { useRace } from './hooks/useRace';
@@ -8,10 +8,10 @@ import { useSeason } from './hooks/useSeason';
 import { Racer, ViewState, Track } from './gameTypes';
 import { formatCountdown } from './utils/format';
 import { getRacerStats } from './utils/stats';
+import { API_URL, headers } from './services/apiClient';
 import { TabButton } from './components/TabButton';
 import { RacerItem } from './components/RacerItem';
 import { StandingsItem } from './components/StandingsItem';
-import { RosterItem } from './components/RosterItem';
 import { TrackItem } from './components/TrackItem';
 import { RacerProfile } from './components/RacerProfile';
 
@@ -33,29 +33,69 @@ export default function App() {
     if (nextRace) completeRace(nextRace.id, results);
   }, [nextRace, completeRace]);
 
-  const { racers, startRace, isRacing, progressMap } = useRace({
+  // Real-time race hook - subscribes to Ably channel
+  const { racers, isRacing, progressMap } = useRace({
     racers: currentRaceRacers,
     track: nextRace?.track || LOADING_TRACK,
-    raceSeed: nextRace?.seed || 0,
-    startTime: nextRace?.startTime || 0,
+    raceId: nextRace?.id || '',
+    isActive: !!nextRace && !nextRace.completed,
     onRaceFinish: handleRaceFinish
   });
 
-  // Countdown Timer
+  // Countdown Timer & Race Trigger
   const [timeLeft, setTimeLeft] = useState(0);
+  const raceStartTriggered = useRef(false);
+  
   useEffect(() => {
-    if (!nextRace || nextRace.completed || isRacing) return;
+    if (!nextRace || nextRace.completed) return;
+    
+    // Check if race should have already started (on refresh)
+    const shouldHaveStarted = Date.now() >= nextRace.startTime;
+    
+    // If race should have started, don't show countdown, just wait for race data
+    if (shouldHaveStarted) {
+      setTimeLeft(0);
+      
+      // Only trigger race start if not already triggered
+      if (!raceStartTriggered.current && !isRacing) {
+        raceStartTriggered.current = true;
+        fetch(`${API_URL}/race-manager`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            raceId: nextRace.id,
+            racers: currentRaceRacers,
+            track: nextRace.track
+          })
+        }).catch(err => console.error('Failed to start race:', err));
+      }
+      return;
+    }
+    
+    // Reset trigger flag when race changes
+    raceStartTriggered.current = false;
+    
     const interval = setInterval(() => {
       const diff = nextRace.startTime - Date.now();
-      if (diff <= 0) {
+      if (diff <= 0 && !raceStartTriggered.current) {
+        raceStartTriggered.current = true;
         setTimeLeft(0);
-        startRace(); // Auto start
-      } else {
+        // Trigger race start via server
+        fetch(`${API_URL}/race-manager`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            raceId: nextRace.id,
+            racers: currentRaceRacers,
+            track: nextRace.track
+          })
+        }).catch(err => console.error('Failed to start race:', err));
+      } else if (diff > 0) {
         setTimeLeft(diff);
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [nextRace, isRacing, startRace]);
+  }, [nextRace, isRacing, currentRaceRacers]);
 
   const formatRaceTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
@@ -86,7 +126,6 @@ export default function App() {
         <View className="flex-row bg-[#0f172a] p-1.5 rounded-full" style={{ flexDirection: 'row', backgroundColor: '#0f172a', padding: 6, borderRadius: 999 }}>
           <TabButton title="Race" active={view === 'race'} onPress={() => setView('race')} />
           <TabButton title="Standings" active={view === 'standings'} onPress={() => setView('standings')} />
-          <TabButton title="Roster" active={view === 'roster'} onPress={() => setView('roster')} />
           <TabButton title="Tracks" active={view === 'tracks'} onPress={() => setView('tracks')} />
         </View>
       </View>
@@ -95,7 +134,7 @@ export default function App() {
         <>
           <View className="p-2 items-center" style={{ padding: 8, alignItems: 'center' }}>
             <Text className="text-[#64748b] text-xs font-bold uppercase tracking-widest" style={{ color: '#64748b', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 2 }}>
-              {nextRace ? `Next: ${nextRace.track.name} (${nextRace.track.length}m)` : 'Season Finished'}
+              {nextRace ? `Next: ${nextRace.track?.name || 'Loading...'} (${nextRace.track?.length || 0}m)` : 'Season Finished'}
             </Text>
             {!isRacing && nextRace && (
               <Text className="text-[#f8fafc] text-5xl font-black mt-2 tracking-tight" style={{ color: '#f8fafc', fontSize: 48, fontWeight: '900', marginTop: 8, letterSpacing: -1 }}>{formatCountdown(timeLeft)}</Text>
@@ -119,34 +158,28 @@ export default function App() {
 
       {view === 'standings' && (
         <FlatList
-          data={Object.keys(standings).sort((a, b) => standings[b] - standings[a])}
+          data={roster
+            .map(racer => ({ 
+              racer, 
+              points: standings[racer.id] || 0,
+              stats: getRacerStats(racer.id, roster, schedule)
+            }))
+            .sort((a, b) => b.points - a.points)}
           renderItem={({ item, index }) => {
-            const racer = roster.find(r => r.id === item);
-            const stats = getRacerStats(item, roster, schedule);
-            if (!racer || !stats) return null;
+            if (!item.stats) return null;
             return (
-              <StandingsItem racer={racer} index={index} points={standings[item]} stats={stats} onPress={handleRacerClick} />
+              <StandingsItem racer={item.racer} index={index} points={item.points} stats={item.stats} onPress={handleRacerClick} />
             );
           }}
-          keyExtractor={(item) => item}
+          keyExtractor={(item) => item.racer.id}
           className="flex-1 mt-2.5"
           style={{ flex: 1, marginTop: 10 }}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
         />
       )}
 
-      {view === 'roster' && (
-        <FlatList
-          data={roster}
-          renderItem={({ item }) => <RosterItem racer={item} onPress={handleRacerClick} />}
-          keyExtractor={(item) => item.id}
-          className="flex-1 mt-2.5"
-          style={{ flex: 1, marginTop: 10 }}
-        />
-      )}
-
       {view === 'profile' && selectedRacerId && (
-        <RacerProfile stats={getRacerStats(selectedRacerId, roster, schedule)!} onBack={() => setView('roster')} />
+        <RacerProfile stats={getRacerStats(selectedRacerId, roster, schedule)!} onBack={() => setView('standings')} />
       )}
 
       {view === 'tracks' && (

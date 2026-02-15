@@ -1,37 +1,35 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { SharedValue, withSpring, makeMutable } from 'react-native-reanimated';
+import { SharedValue, makeMutable, withTiming } from 'react-native-reanimated';
 import { Racer, Track } from '../gameTypes';
-import { SeededRandom } from '../utils/random';
-
-const SPEED_VARIANCE = 0.15; // +/- 15% performance swing per race
+import { getRaceChannel, getAblyClient } from '../services/apiClient';
 
 interface UseRaceProps {
   racers: Racer[];
   track: Track;
-  raceSeed: number;
-  startTime: number;
-  onRaceFinish: (results: Racer[]) => void;
+  raceId: string;
+  isActive: boolean;
+  onRaceFinish?: (results: Racer[]) => void;
 }
 
-export const useRace = ({ racers: inputRacers, track, raceSeed, startTime, onRaceFinish }: UseRaceProps) => {
-  // React State for the UI List (updates less frequently)
-  const [racers, setRacers] = useState<Racer[]>(
-    inputRacers.map((r, index) => ({
-      ...r,
-      lane: index, // Assign lane based on starting position
-      progress: 0,
-      totalDistance: 0,
-      laps: 0,
-      status: 'active' as const,
-      currentSpeed: r.baseSpeed
-    }))
-  );
-  const [isRacing, setIsRacing] = useState(false);
+interface RaceUpdate {
+  type: 'progress' | 'finished' | 'started';
+  raceId: string;
+  timestamp: number;
+  racers?: Racer[];
+  results?: Racer[];
+  progressMap?: Record<string, number>;
+}
 
-  // Refs for Game Loop State (Mutable, high performance)
-  const gameState = useRef({ racers, isRacing: false });
-  const requestRef = useRef<number>();
-  const lastTimeRef = useRef<number>();
+export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFinish }: UseRaceProps) => {
+  // React State for the UI List (throttled updates)
+  const [racers, setRacers] = useState<Racer[]>([]);
+  const [isRacing, setIsRacing] = useState(false);
+  
+  // Refs for tracking
+  const racersRef = useRef<Racer[]>([]);
+  const lastStateUpdate = useRef(0);
+  const isSubscribed = useRef(false);
+  const currentRaceId = useRef<string>('');
 
   // Reanimated Shared Values for UI (Map of ID -> Progress)
   const progressMap = useMemo(() => {
@@ -42,37 +40,116 @@ export const useRace = ({ racers: inputRacers, track, raceSeed, startTime, onRac
     return map;
   }, [inputRacers]);
 
-  // Calculate deterministic performance modifiers for this specific race
-  const raceModifiers = useMemo(() => {
-    const rng = new SeededRandom(raceSeed);
-    const mods: Record<string, number> = {};
-    
-    inputRacers.forEach(r => {
-      // Base variance from seed
-      let mod = rng.range(1 - SPEED_VARIANCE, 1 + SPEED_VARIANCE);
-      
-      // Track preference bonus
-      if (r.trackPreference === track.surface) mod *= 1.05;
-      
-      mods[r.id] = mod;
-    });
-    return mods;
-  }, [raceSeed, inputRacers, track]);
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    if (currentRaceId.current && isSubscribed.current) {
+      try {
+        const client = getAblyClient();
+        if (client) {
+          const channel = client.channels.get(`race:${currentRaceId.current}`);
+          channel.unsubscribe('race-update');
+          console.log(`🧹 Cleaned up race subscription for ${currentRaceId.current}`);
+        }
+      } catch (err) {
+        console.error('Error during cleanup:', err);
+      }
+      isSubscribed.current = false;
+    }
+  }, []);
+
+  // Subscribe to Ably channel when race becomes active
+  useEffect(() => {
+    // Cleanup previous subscription if raceId changes
+    if (currentRaceId.current && currentRaceId.current !== raceId) {
+      cleanup();
+    }
+
+    if (!isActive || !raceId) {
+      cleanup();
+      return;
+    }
+
+    // Prevent duplicate subscriptions
+    if (isSubscribed.current && currentRaceId.current === raceId) {
+      return;
+    }
+
+    try {
+      const channel = getRaceChannel(raceId);
+      currentRaceId.current = raceId;
+      isSubscribed.current = true;
+
+      console.log(`📡 Subscribing to race: ${raceId}`);
+
+      // Subscribe to race updates
+      channel.subscribe('race-update', (message: any) => {
+        const update = message.data as RaceUpdate;
+        const now = Date.now();
+        
+        if (update.type === 'started') {
+          console.log('🚀 Race started');
+          setIsRacing(true);
+          if (update.racers) {
+            racersRef.current = update.racers;
+            setRacers(update.racers);
+            lastStateUpdate.current = now;
+          }
+        } else if (update.type === 'progress') {
+          if (update.progressMap) {
+            // Update shared values for smooth animation
+            Object.entries(update.progressMap).forEach(([racerId, progress]) => {
+              if (progressMap[racerId]) {
+                progressMap[racerId].value = withTiming(progress, { duration: 200 });
+              }
+            });
+          }
+          
+          if (update.racers) {
+            racersRef.current = update.racers;
+            
+            // Throttle React state updates to every 400ms (faster UI updates)
+            if (now - lastStateUpdate.current > 400) {
+              setRacers(update.racers);
+              lastStateUpdate.current = now;
+            }
+          }
+        } else if (update.type === 'finished') {
+          console.log('🏁 Race finished');
+          setIsRacing(false);
+          if (update.results) {
+            racersRef.current = update.results;
+            setRacers(update.results);
+            onRaceFinish?.(update.results);
+          }
+          // Clean up subscription after race finishes
+          cleanup();
+        }
+      });
+
+      return () => {
+        cleanup();
+      };
+    } catch (error) {
+      console.error('Failed to subscribe to Ably channel:', error);
+      isSubscribed.current = false;
+    }
+  }, [isActive, raceId, progressMap, onRaceFinish, cleanup]);
 
   // Reset state when input racers change (new race)
   useEffect(() => {
     const newRacers = inputRacers.map((r, index) => ({
       ...r,
-      lane: index,
+      lane: index % 8,
       progress: 0,
       totalDistance: 0,
       laps: 0,
-      status: 'active' as const,
-      currentSpeed: r.baseSpeed
+      status: 'waiting' as const,
+      currentSpeed: 0
     }));
+    racersRef.current = newRacers;
     setRacers(newRacers);
-    gameState.current = { racers: newRacers, isRacing: false };
     setIsRacing(false);
+    lastStateUpdate.current = 0;
     
     // Reset shared values
     Object.keys(progressMap).forEach(key => {
@@ -80,95 +157,19 @@ export const useRace = ({ racers: inputRacers, track, raceSeed, startTime, onRac
     });
   }, [inputRacers, track, progressMap]);
 
-  const updateRace = useCallback((time: number) => {
-    // Calculate elapsed time based on the fixed Server Start Time
-    // This makes the race deterministic for all users
-    const now = Date.now();
-    const elapsed = Math.max(0, now - startTime);
-
-    let activeRacers = 0;
-
-    const updatedRacers = gameState.current.racers.map(racer => {
-      // If already finished in a previous frame, keep it finished
-      if (racer.status === 'finished') return racer;
-
-      activeRacers++;
-
-      // 1. Calculate Speed (m/s) using the pre-calculated deterministic modifier
-      const mod = raceModifiers[racer.id] || 1;
-      const speed = racer.baseSpeed * mod;
-      
-      // 2. Calculate Total Distance based on Elapsed Time
-      // Distance = Speed (m/s) * Time (s)
-      const newTotalDistance = speed * (elapsed / 1000);
-
-      let newLaps = Math.floor(newTotalDistance / track.length);
-      let newProgress = (newTotalDistance % track.length) / track.length;
-
-      // 3. Check Finish
-      if (newLaps >= track.laps) {
-        return { 
-          ...racer, 
-          status: 'finished' as const, 
-          progress: 1, 
-          totalDistance: track.length * track.laps,
-          finishTime: elapsed // Use calculated elapsed time for consistency
-        };
-      }
-
-      // Update SharedValue for UI
-      if (progressMap[racer.id]) {
-        progressMap[racer.id].value = newProgress;
-      }
-
-      return {
-        ...racer,
-        progress: newProgress,
-        totalDistance: newTotalDistance,
-        laps: newLaps,
-      };
-    });
-
-    // Sort by distance for the Leaderboard
-    updatedRacers.sort((a, b) => {
-        // If finished, prioritize finished
-        if (a.status === 'finished' && b.status !== 'finished') return -1;
-        if (b.status === 'finished' && a.status !== 'finished') return 1;
-        return b.totalDistance - a.totalDistance;
-    });
-
-    gameState.current = { ...gameState.current, racers: updatedRacers };
-
-    setRacers(updatedRacers);
-
-    if (activeRacers > 0) {
-      requestRef.current = requestAnimationFrame(updateRace);
-    } else {
-      setIsRacing(false);
-      gameState.current.isRacing = false;
-      onRaceFinish(updatedRacers);
-    }
-  }, [track, startTime, onRaceFinish, progressMap, raceModifiers]);
-
-  const startRace = () => {
-    if (gameState.current.isRacing) return;
-    
-    gameState.current.isRacing = true;
-    setIsRacing(true);
-    // We don't set start time here anymore, it comes from props
-    requestRef.current = requestAnimationFrame(updateRace);
-  };
-
-  const stopRace = () => {
-    if (requestRef.current) cancelAnimationFrame(requestRef.current);
-    gameState.current.isRacing = false;
-    setIsRacing(false);
-  };
-
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      cleanup();
     };
+  }, [cleanup]);
+
+  const startRace = useCallback(() => {
+    console.log('Race will start automatically via server');
+  }, []);
+
+  const stopRace = useCallback(() => {
+    console.log('Race will finish automatically via server');
   }, []);
 
   return { racers, isRacing, startRace, stopRace, progressMap };

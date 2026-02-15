@@ -1,3 +1,5 @@
+const { getStore } = require('@netlify/blobs');
+
 const SITE_ID = process.env.NETLIFY_SITE_ID;
 const TOKEN = process.env.NETLIFY_AUTH_TOKEN;
 
@@ -7,6 +9,11 @@ if (!SITE_ID || !TOKEN) {
   process.exit(1);
 }
 
+const store = getStore('tracks', {
+  siteID: SITE_ID,
+  token: TOKEN,
+});
+
 const TRACKS = [
   { id: 't1', name: 'Oval Circuit', surface: 'asphalt', length: 1000, laps: 3 },
   { id: 't2', name: 'Dirt Derby', surface: 'dirt', length: 800, laps: 5 },
@@ -14,32 +21,20 @@ const TRACKS = [
 ];
 
 async function seed() {
-  console.log('🚀 Manual REST Seed: Bypassing SDK entirely...');
+  console.log('🚀 Seeding with Netlify Blobs SDK...');
 
   for (const track of TRACKS) {
-    // The Direct Netlify Blobs API endpoint
-    const url = `https://api.netlify.com/api/v1/sites/${SITE_ID}/blobs/tracks/${track.id}`;
-
     try {
-      const res = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(track),
-      });
-
-      if (res.ok) {
-        console.log(`   ✅ Created track: ${track.name}`);
-      } else {
-        const err = await res.text();
-        console.error(`   ❌ Failed: ${track.name} - ${res.status}: ${err}`);
-      }
+      await store.set(track.id, JSON.stringify(track));
+      console.log(`   ✅ Created track: ${track.name}`);
     } catch (e) {
-      console.error(`   🚨 Network Error:`, e.message);
+      console.error(`   ❌ Failed: ${track.name} - ${e.message}`);
     }
   }
+  
+  console.log('\n📋 Verifying...');
+  const { blobs } = await store.list();
+  console.log('Blobs:', blobs);
 }
 
 seed();

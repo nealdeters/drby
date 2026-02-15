@@ -1,5 +1,6 @@
 // frontend/src/services/racesService.ts
 import { API_URL, headers } from './apiClient';
+import { RaceEvent } from '../gameTypes';
 
 export interface Race {
   id?: string;
@@ -48,5 +49,37 @@ export const racesService = {
       headers,
     });
     if (!response.ok) throw new Error('Failed to delete race');
+  },
+
+  // Schedule persistence methods
+  async getSeasonSchedule(): Promise<RaceEvent[]> {
+    const response = await fetch(`${API_URL}/races/schedule`, { headers });
+    if (!response.ok) throw new Error('Failed to fetch schedule');
+    return response.json();
+  },
+
+  async saveSeasonSchedule(schedule: RaceEvent[]): Promise<void> {
+    const response = await fetch(`${API_URL}/races/schedule`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ schedule }),
+    });
+    if (!response.ok) throw new Error('Failed to save schedule');
+  },
+
+  // Standings persistence methods
+  async getStandings(): Promise<Record<string, number>> {
+    const response = await fetch(`${API_URL}/races/standings`, { headers });
+    if (!response.ok) throw new Error('Failed to fetch standings');
+    return response.json();
+  },
+
+  async saveStandings(standings: Record<string, number>): Promise<void> {
+    const response = await fetch(`${API_URL}/races/standings`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ standings }),
+    });
+    if (!response.ok) throw new Error('Failed to save standings');
   }
 };
