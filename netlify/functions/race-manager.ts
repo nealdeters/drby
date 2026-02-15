@@ -119,6 +119,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
       if (racer.totalDistance >= totalDistance) {
         racer.status = 'finished';
         racer.finishTime = elapsed;
+        // Cap distance at exact total to prevent overruns (e.g., 4003m instead of 4000m)
+        racer.totalDistance = totalDistance;
         // Ensure lap count shows complete
         racer.laps = track.laps;
         racer.progress = 1;

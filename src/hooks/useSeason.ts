@@ -80,8 +80,8 @@ export const useSeason = () => {
     const now = Date.now();
     // Schedule 10 races, 10 minutes apart
     for (let i = 0; i < 10; i++) {
-      // Pick 3-12 random racers (Simulating racers choosing to race or rest)
-      const numRacers = 3 + Math.floor(Math.random() * 10);
+      // Pick 3-8 random racers (limited to 8 for track visibility)
+      const numRacers = 3 + Math.floor(Math.random() * 6);
       const shuffled = [...currentRoster].sort(() => 0.5 - Math.random());
       const selectedIds = shuffled.slice(0, numRacers).map(r => r.id);
 

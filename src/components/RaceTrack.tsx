@@ -23,14 +23,15 @@ const CY = TRACK_HEIGHT / 2;
 const R_BASE = 70; // Radius of the turns
 const S_LEN = 200; // Length of the straightaways
 
-const RacerDot = ({ racer, progress }: { racer: Racer; progress: SharedValue<number> }) => {
+const RacerDot = ({ racer, progress, laneIndex, totalLanes }: { racer: Racer; progress: SharedValue<number>; laneIndex: number; totalLanes: number }) => {
   if (!progress) return null;
 
   // Animate position based on progress (0 to 1)
-  // Offset radius based on lane (0-7)
-  // Lane 0 is inner, Lane 7 is outer
-  const laneOffset = racer.lane * 12; 
-  const R = R_BASE + laneOffset;
+  // Each racer gets their own lane with proper spacing
+  // Distribute lanes evenly across the track width
+  const laneSpacing = 18; // Pixels between lane centers
+  const laneOffset = (laneIndex - (totalLanes - 1) / 2) * laneSpacing;
+  const R = R_BASE + 70 + laneOffset; // Start from inner track edge
   const S = S_LEN;
   const pathLen = 2 * S + 2 * Math.PI * R;
 
@@ -144,6 +145,29 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
           strokeWidth={2}
           strokeDasharray="15,15"
         />
+        
+        {/* Lane Dividers */}
+        {racers.map((_, index) => {
+          const laneSpacing = 18;
+          const laneOffset = (index - (racers.length - 1) / 2) * laneSpacing;
+          const R = R_BASE + 70 + laneOffset;
+          return (
+            <Path
+              key={`lane-${index}`}
+              d={`
+                M ${CX} ${CY - R}
+                L ${CX - S_LEN / 2} ${CY - R}
+                A ${R} ${R} 0 0 0 ${CX - S_LEN / 2} ${CY + R}
+                L ${CX + S_LEN / 2} ${CY + R}
+                A ${R} ${R} 0 0 0 ${CX + S_LEN / 2} ${CY - R}
+                L ${CX} ${CY - R}
+              `}
+              fill="none"
+              stroke="rgba(255,255,255,0.05)"
+              strokeWidth={1}
+            />
+          );
+        })}
 
         {/* Inner Field (Grass) */}
         <Path
@@ -163,11 +187,13 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
         </G>
 
         {/* Racers */}
-        {racers.map((racer) => (
+        {racers.map((racer, index) => (
           <RacerDot 
             key={racer.id} 
             racer={racer} 
-            progress={progressMap[racer.id]} 
+            progress={progressMap[racer.id]}
+            laneIndex={index}
+            totalLanes={racers.length}
           />
         ))}
       </Svg>
