@@ -1,11 +1,12 @@
 import './polyfills';
 import './index.css';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, FlatList, Text, SafeAreaView, TouchableOpacity, StatusBar } from 'react-native';
+import { View, FlatList, Text, SafeAreaView, TouchableOpacity, StatusBar, Dimensions, ScrollView } from 'react-native';
 import { RaceTrack } from './components/RaceTrack';
 import { useRace } from './hooks/useRace';
-import { useSeason } from './hooks/useSeason';
-import { Racer, ViewState, Track } from './gameTypes';
+import { useSeason, CompletedSeason } from './hooks/useSeason';
+import { Racer, Track } from './gameTypes';
+import { useRouter, ViewState } from './hooks/useRouter';
 import { formatCountdown } from './utils/format';
 import { getRacerStats } from './utils/stats';
 import { API_URL, headers } from './services/apiClient';
@@ -14,88 +15,300 @@ import { RacerItem } from './components/RacerItem';
 import { StandingsItem } from './components/StandingsItem';
 import { TrackItem } from './components/TrackItem';
 import { RacerProfile } from './components/RacerProfile';
+import { HamburgerMenu } from './components/HamburgerMenu';
+import { SeasonsList } from './components/SeasonsList';
+import { theme } from './theme';
 
 const LOADING_TRACK: Track = { id: '0', name: 'Loading', surface: 'asphalt', length: 1000, laps: 3 };
 
+// Debug: Set to true to show test race button in development
+const DEBUG_SHOW_TEST_RACE = process.env.NODE_ENV === 'development';
+
+// Simple hook to detect mobile screen size
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 768;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return isMobile;
+};
+
 export default function App() {
-  const [view, setView] = useState<ViewState>('race');
-  const [selectedRacerId, setSelectedRacerId] = useState<string | null>(null);
-  const { roster, schedule, standings, nextRace, completeRace, tracks } = useSeason();
+  const { view, selectedRacerId, selectedHistoricalSeason, selectedHistoricalRacerId, navigate, goBack } = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeRaceId, setActiveRaceId] = useState<string>(''); // Track active test race
+  const [testRaceRacers, setTestRaceRacers] = useState<Racer[]>([]); // Racers for test race
+  const [testRaceTrack, setTestRaceTrack] = useState<Track | null>(null); // Track for test race
+  const isMobile = useIsMobile();
+  const { roster, schedule, standings, nextRace, completeRace, skipOverdueRace, tracks, completedSeasons, currentSeasonNumber } = useSeason();
+  
+  // Helper function to find next upcoming race (even if not immediate next)
+  const getNextUpcomingRace = useCallback(() => {
+    const now = Date.now();
+    return schedule.find(race => !race.completed && race.startTime > now);
+  }, [schedule]);
   
   // Prepare racers for the current/next race
   // Fix: Memoize this array to prevent infinite re-renders in useRace
-  const currentRaceRacers = useMemo(() => nextRace 
-    ? roster.filter(r => nextRace.racerIds.includes(r.id))
-    : [], [nextRace, roster]);
+  const currentRaceRacers = useMemo(() => {
+    // Use test race racers if in test mode
+    if (activeRaceId.startsWith('test-')) {
+      return testRaceRacers;
+    }
+    if (!nextRace || !roster.length) return [];
+    const raceRacers = roster.filter(r => nextRace.racerIds.includes(r.id));
+    // Debug log if mismatch detected
+    if (nextRace.racerIds.length > 0 && raceRacers.length === 0) {
+      console.warn('⚠️ Race has racerIds but none found in roster:', nextRace.racerIds, 'roster IDs:', roster.map(r => r.id));
+    }
+    return raceRacers;
+  }, [nextRace, roster, activeRaceId, testRaceRacers]);
 
   // Fix: Memoize callback to prevent unnecessary updates
   const handleRaceFinish = useCallback((results: Racer[]) => {
+    // Skip completing test races - they don't affect standings or schedule
+    if (activeRaceId.startsWith('test-')) {
+      console.log('🧪 Test race finished, skipping completion');
+      setActiveRaceId(''); // Clear test race
+      setTestRaceRacers([]);
+      setTestRaceTrack(null);
+      return;
+    }
     if (nextRace) completeRace(nextRace.id, results);
-  }, [nextRace, completeRace]);
+  }, [nextRace, completeRace, activeRaceId]);
+
+  // Determine which race to show - test race takes priority
+  const displayRaceId = activeRaceId || nextRace?.id || '';
+  const displayTrack = activeRaceId.startsWith('test-') 
+    ? (testRaceTrack || LOADING_TRACK)
+    : nextRace?.track || LOADING_TRACK;
+  const displayIsActive = !!(activeRaceId || (nextRace && !nextRace.completed));
 
   // Real-time race hook - subscribes to Ably channel
   const { racers, isRacing, progressMap } = useRace({
     racers: currentRaceRacers,
-    track: nextRace?.track || LOADING_TRACK,
-    raceId: nextRace?.id || '',
-    isActive: !!nextRace && !nextRace.completed,
+    track: displayTrack,
+    raceId: displayRaceId,
+    isActive: displayIsActive,
     onRaceFinish: handleRaceFinish
   });
 
   // Countdown Timer & Race Trigger
   const [timeLeft, setTimeLeft] = useState(0);
+  const [showNextRaceCountdown, setShowNextRaceCountdown] = useState(false);
   const raceStartTriggered = useRef(false);
+  const currentRaceId = useRef<string | null>(null);
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Clear countdown interval helper
+  const clearCountdownInterval = useCallback(() => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+  }, []);
+  
+  // Reset trigger flag when race state changes
+  useEffect(() => {
+    if (!isRacing && currentRaceId.current) {
+      // Race finished, reset trigger for next race
+      raceStartTriggered.current = false;
+      currentRaceId.current = null;
+      setShowNextRaceCountdown(true);
+      console.log('🏁 Race state cleared, ready for next race');
+      
+      // Clear any existing interval and start fresh countdown for next race
+      clearCountdownInterval();
+      
+      // Find next upcoming race and start countdown
+      const nextUpcoming = getNextUpcomingRace();
+      if (nextUpcoming && !nextUpcoming.completed) {
+        const updateCountdown = () => {
+          const diff = nextUpcoming.startTime - Date.now();
+          if (diff > 0) {
+            setTimeLeft(diff);
+          } else {
+            setTimeLeft(0);
+            clearCountdownInterval();
+          }
+        };
+        updateCountdown();
+        countdownIntervalRef.current = setInterval(updateCountdown, 1000);
+      }
+    }
+  }, [isRacing, getNextUpcomingRace, clearCountdownInterval]);
+
+  // Enhanced race trigger with retry mechanism
+  const triggerRaceWithRetry = useCallback(async (race: any, racers: Racer[], retryCount = 0) => {
+    try {
+      const response = await fetch(`${API_URL}/race-manager`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          raceId: race.id,
+          racers: racers,
+          track: race.track
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Race manager returned ${response.status}`);
+      }
+      
+      console.log('✅ Race triggered successfully:', race.id);
+    } catch (err) {
+      console.error('❌ Failed to start race:', err);
+      
+      // Retry up to 3 times with exponential backoff
+      if (retryCount < 3) {
+        const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+        console.log(`🔄 Retrying race trigger in ${delay}ms (attempt ${retryCount + 2})`);
+        setTimeout(() => triggerRaceWithRetry(race, racers, retryCount + 1), delay);
+      } else {
+        // Reset trigger flag on final failure
+        raceStartTriggered.current = false;
+        console.log('❌ Race trigger failed after 3 retries, giving up');
+      }
+    }
+  }, [API_URL, headers]);
+
+  // Debug: Start a test race with random racers and track
+  const startTestRace = useCallback(async () => {
+    if (!roster.length || !tracks.length) {
+      console.warn('Cannot start test race: no racers or tracks available');
+      return;
+    }
+
+    // Pick 4-8 random racers
+    const shuffledRacers = [...roster].sort(() => 0.5 - Math.random());
+    const numRacers = 4 + Math.floor(Math.random() * 5); // 4-8
+    const selectedRacers = shuffledRacers.slice(0, numRacers);
+
+    // Use the same track as the next scheduled race
+    const nextScheduledTrack = nextRace?.track || tracks[0];
+    const testTrack = nextScheduledTrack || tracks[Math.floor(Math.random() * tracks.length)];
+
+    // Create test race ID
+    const testRaceId = `test-race-${Date.now()}`;
+
+    // Set active race ID and racers so UI displays the test race
+    setActiveRaceId(testRaceId);
+    setTestRaceRacers(selectedRacers);
+    setTestRaceTrack(testTrack);
+
+    console.log('🧪 Starting test race:', testRaceId, 'with', numRacers, 'racers on', testTrack.name);
+
+    try {
+      const response = await fetch(`${API_URL}/race-manager`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          raceId: testRaceId,
+          racers: selectedRacers,
+          track: testTrack
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Race manager returned ${response.status}`);
+      }
+
+      console.log('✅ Test race started:', testRaceId);
+    } catch (err) {
+      console.error('❌ Failed to start test race:', err);
+      setActiveRaceId('');
+      setTestRaceRacers([]);
+    }
+  }, [roster, tracks, API_URL, headers]);
   
   useEffect(() => {
-    if (!nextRace || nextRace.completed) return;
+    // Clear any existing interval first
+    clearCountdownInterval();
     
-    // Check if race should have already started (on refresh)
-    const shouldHaveStarted = Date.now() >= nextRace.startTime;
+    const upcomingRace = nextRace || getNextUpcomingRace();
     
-    // If race should have started, don't show countdown, just wait for race data
-    if (shouldHaveStarted) {
+    if (!upcomingRace || upcomingRace.completed) {
       setTimeLeft(0);
-      
-      // Only trigger race start if not already triggered
-      if (!raceStartTriggered.current && !isRacing) {
-        raceStartTriggered.current = true;
-        fetch(`${API_URL}/race-manager`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            raceId: nextRace.id,
-            racers: currentRaceRacers,
-            track: nextRace.track
-          })
-        }).catch(err => console.error('Failed to start race:', err));
-      }
+      setShowNextRaceCountdown(false);
       return;
     }
     
     // Reset trigger flag when race changes
-    raceStartTriggered.current = false;
+    if (currentRaceId.current !== upcomingRace.id) {
+      currentRaceId.current = upcomingRace.id;
+      raceStartTriggered.current = false;
+      setShowNextRaceCountdown(false);
+    }
     
-    const interval = setInterval(() => {
-      const diff = nextRace.startTime - Date.now();
+    // Check if race should have already started (on refresh)
+    const shouldHaveStarted = Date.now() >= upcomingRace.startTime;
+    const overdueMinutes = shouldHaveStarted ? (Date.now() - upcomingRace.startTime) / (1000 * 60) : 0;
+    
+    // If race is more than 5 minutes overdue, skip it automatically
+    if (shouldHaveStarted && overdueMinutes > 5) {
+      console.log(`⏰ Race ${upcomingRace.id} is ${overdueMinutes.toFixed(1)} minutes overdue, skipping...`);
+      skipOverdueRace(upcomingRace.id);
+      return;
+    }
+    
+    // If race should have started, don't show countdown, just wait for race data
+    if (shouldHaveStarted) {
+      setTimeLeft(0);
+      setShowNextRaceCountdown(false);
+      
+      // Only trigger race start if not already triggered and not racing
+      if (!raceStartTriggered.current && !isRacing) {
+        raceStartTriggered.current = true;
+        console.log('🚀 Triggering overdue race:', upcomingRace.id, 'with racers:', currentRaceRacers.map(r => r.id));
+        if (currentRaceRacers.length === 0) {
+          console.error('❌ Cannot start race - no valid racers found');
+          raceStartTriggered.current = false;
+          return;
+        }
+        triggerRaceWithRetry(upcomingRace, currentRaceRacers);
+      }
+      return;
+    }
+    
+    // Normal countdown for future races
+    const updateCountdown = () => {
+      const diff = upcomingRace.startTime - Date.now();
       if (diff <= 0 && !raceStartTriggered.current) {
         raceStartTriggered.current = true;
         setTimeLeft(0);
-        // Trigger race start via server
-        fetch(`${API_URL}/race-manager`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            raceId: nextRace.id,
-            racers: currentRaceRacers,
-            track: nextRace.track
-          })
-        }).catch(err => console.error('Failed to start race:', err));
+        setShowNextRaceCountdown(false);
+        console.log('🚀 Triggering scheduled race:', upcomingRace.id, 'with racers:', currentRaceRacers.map(r => r.id));
+        if (currentRaceRacers.length === 0) {
+          console.error('❌ Cannot start race - no valid racers found');
+          raceStartTriggered.current = false;
+          return;
+        }
+        triggerRaceWithRetry(upcomingRace, currentRaceRacers);
+        clearCountdownInterval();
       } else if (diff > 0) {
         setTimeLeft(diff);
       }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [nextRace, isRacing, currentRaceRacers]);
+    };
+    
+    // Initial update
+    updateCountdown();
+    
+    // Set up interval
+    countdownIntervalRef.current = setInterval(updateCountdown, 1000);
+    
+    // Cleanup
+    return () => {
+      clearCountdownInterval();
+    };
+  }, [nextRace, getNextUpcomingRace, isRacing, currentRaceRacers, clearCountdownInterval]);
 
   const formatRaceTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
@@ -109,36 +322,81 @@ export default function App() {
   };
 
   const handleRacerClick = (racerId: string) => {
-    setSelectedRacerId(racerId);
-    setView('profile');
+    navigate({ selectedRacerId: racerId, view: 'profile' });
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-[#020617]" style={{ flex: 1, backgroundColor: '#020617' }}>
+    <SafeAreaView className="flex-1" style={{ flex: 1, backgroundColor: theme.surface.page }}>
       <StatusBar barStyle="light-content" />
       
       {/* Header / Nav */}
-      <View className="flex-row justify-between items-center px-6 py-6 bg-[#020617]" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 24, backgroundColor: '#020617' }}>
-        <View>
-          <Text className="text-3xl font-black italic text-white tracking-tighter" style={{ fontSize: 30, fontWeight: '900', fontStyle: 'italic', color: '#f8fafc', letterSpacing: -1 }}>DRBY<Text className="text-[#6366f1]" style={{ color: '#6366f1' }}>.</Text></Text>
-          {/* <Text className="text-[#64748b] text-[10px] font-bold tracking-[0.2em] uppercase" style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold', letterSpacing: 3, textTransform: 'uppercase' }}>Racing League</Text> */}
-        </View>
-        <View className="flex-row bg-[#0f172a] p-1.5 rounded-full" style={{ flexDirection: 'row', backgroundColor: '#0f172a', padding: 6, borderRadius: 999 }}>
-          <TabButton title="Race" active={view === 'race'} onPress={() => setView('race')} />
-          <TabButton title="Standings" active={view === 'standings'} onPress={() => setView('standings')} />
-          <TabButton title="Tracks" active={view === 'tracks'} onPress={() => setView('tracks')} />
-        </View>
-      </View>
+       <View className="flex-row justify-between items-center px-4 py-6 sm:px-6" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: isMobile ? 16 : 24, paddingVertical: 24, backgroundColor: theme.surface.page }}>
+           <TouchableOpacity onPress={() => navigate({ view: 'race' })}>
+            <Text className="text-3xl font-black italic tracking-tighter" style={{ fontSize: 30, fontWeight: '900', fontStyle: 'italic', color: theme.text.primary, letterSpacing: -1 }}>DRBY<Text style={{ color: theme.primary[600] }}>.</Text></Text>
+          </TouchableOpacity>
+          
+          {/* Desktop Navigation */}
+          {!isMobile && (
+             <View className="flex-row p-1.5 rounded-full" style={{ flexDirection: 'row', backgroundColor: theme.surface.card, padding: 6, borderRadius: 999 }}>
+               <TabButton title="Race" active={view === 'race'} onPress={() => navigate({ view: 'race' })} />
+               <TabButton title="Standings" active={view === 'standings'} onPress={() => navigate({ view: 'standings' })} />
+               <TabButton title="Seasons" active={view === 'seasons'} onPress={() => navigate({ view: 'seasons' })} />
+               <TabButton title="Tracks" active={view === 'tracks'} onPress={() => navigate({ view: 'tracks' })} />
+            </View>
+          )}
+         
+         {/* Mobile Navigation */}
+         {isMobile && (
+           <>
+             <TouchableOpacity onPress={() => setMenuOpen(true)} className="p-2" style={{ padding: 8, marginRight: -8 }}>
+               <Text className="text-white text-2xl" style={{ color: 'white', fontSize: 24 }}>☰</Text>
+             </TouchableOpacity>
+             <HamburgerMenu
+               visible={menuOpen}
+               onClose={() => setMenuOpen(false)}
+               activeView={view}
+               items={[
+                  { id: 'race', title: 'Race', onPress: () => navigate({ view: 'race' }) },
+                  { id: 'standings', title: 'Standings', onPress: () => navigate({ view: 'standings' }) },
+                  { id: 'seasons', title: 'Seasons', onPress: () => navigate({ view: 'seasons' }) },
+                  { id: 'tracks', title: 'Tracks', onPress: () => navigate({ view: 'tracks' }) },
+               ]}
+             />
+           </>
+         )}
+       </View>
 
       {view === 'race' && (
-        <>
-          <View className="p-2 items-center" style={{ padding: 8, alignItems: 'center' }}>
-            <Text className="text-[#64748b] text-xs font-bold uppercase tracking-widest" style={{ color: '#64748b', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 2 }}>
-              {nextRace ? `Next: ${nextRace.track?.name || 'Loading...'} (${nextRace.track?.length || 0}m)` : 'Season Finished'}
-            </Text>
-            {!isRacing && nextRace && (
-              <Text className="text-[#f8fafc] text-5xl font-black mt-2 tracking-tight" style={{ color: '#f8fafc', fontSize: 48, fontWeight: '900', marginTop: 8, letterSpacing: -1 }}>{formatCountdown(timeLeft)}</Text>
-            )}
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
+           <View className="p-2 items-center" style={{ padding: 8, alignItems: 'center' }}>
+              <Text className="text-xs font-bold uppercase tracking-widest" style={{ color: theme.text.secondary, fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 2 }}>
+               {nextRace ? `Next: ${nextRace.track?.name || 'Loading...'} (${nextRace.track?.length || 0}m x ${nextRace.track?.laps || 0} laps)` : 'Season Finished'}
+             </Text>
+             {!isRacing && (nextRace || getNextUpcomingRace()) && (
+                <>
+                  {showNextRaceCountdown && timeLeft > 0 && (
+                    <Text className="text-sm font-bold uppercase tracking-widest mt-2" style={{ color: theme.text.muted, fontSize: 14, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 2, marginTop: 8 }}>
+                      Next Race In
+                    </Text>
+                  )}
+                  <Text className="text-5xl font-black mt-1 tracking-tight" style={{ color: theme.text.primary, fontSize: 48, fontWeight: '900', marginTop: 4, letterSpacing: -1 }}>
+                    {timeLeft > 0 ? formatCountdown(timeLeft) : 'Starting...'}
+                  </Text>
+                </>
+              )}
+              {DEBUG_SHOW_TEST_RACE && !isRacing && (
+                <TouchableOpacity
+                  onPress={startTestRace}
+                  style={{ marginTop: 16, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: theme.semantic.warning, borderRadius: 8 }}
+                >
+                  <Text style={{ color: '#000', fontWeight: 'bold' }}>🧪 Start Test Race</Text>
+                </TouchableOpacity>
+              )}
+            {/* {isRacing && (
+               <Text className="text-2xl font-black mt-2 tracking-tight" style={{ color: theme.text.muted, fontSize: 24, fontWeight: '900', marginTop: 8, letterSpacing: -1 }}>
+                Racing!
+              </Text>
+            )} */}
           </View>
 
           <View className="h-[300px] w-full" style={{ height: 300, width: '100%' }}>
@@ -146,50 +404,436 @@ export default function App() {
           </View>
 
           <FlatList
-            data={racers}
-            renderItem={({ item, index }) => <RacerItem racer={item} index={index} onPress={handleRacerClick} />}
+            data={racers.sort((a, b) => {
+              // Sort by total distance (most advanced first)
+              if (a.totalDistance !== b.totalDistance) {
+                return b.totalDistance - a.totalDistance;
+              }
+              // If same distance, sort by progress within current lap
+              return b.progress - a.progress;
+            })}
+            renderItem={({ item, index }) => <RacerItem racer={item} index={index} onPress={handleRacerClick} track={nextRace?.track} />}
             keyExtractor={(item) => item.id}
             className="flex-1 mt-2.5"
             style={{ flex: 1, marginTop: 10 }}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
+            contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
           />
-        </>
+        </ScrollView>
       )}
 
       {view === 'standings' && (
-        <FlatList
-          data={roster
-            .map(racer => ({ 
-              racer, 
-              points: standings[racer.id] || 0,
-              stats: getRacerStats(racer.id, roster, schedule)
-            }))
-            .sort((a, b) => b.points - a.points)}
-          renderItem={({ item, index }) => {
-            if (!item.stats) return null;
-            return (
-              <StandingsItem racer={item.racer} index={index} points={item.points} stats={item.stats} onPress={handleRacerClick} />
-            );
-          }}
-          keyExtractor={(item) => item.racer.id}
-          className="flex-1 mt-2.5"
-          style={{ flex: 1, marginTop: 10 }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
-        />
+        <View style={{ flex: 1, padding: 16 }}>
+          <View style={{ 
+            backgroundColor: theme.surface.card, 
+            borderRadius: 24, 
+            flex: 1,
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <View style={{ 
+              padding: 20,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <View>
+                <Text style={{ 
+                  fontSize: 24, 
+                  fontWeight: '900', 
+                  color: theme.text.primary,
+                  letterSpacing: -0.5
+                }}>
+                  Standings
+                </Text>
+                <Text style={{ 
+                  fontSize: 12, 
+                  color: theme.text.secondary,
+                  marginTop: 4,
+                  fontWeight: '600'
+                }}>
+                  Season {currentSeasonNumber}
+                </Text>
+              </View>
+            </View>
+            {Object.keys(standings).length === 0 ? (
+              <View style={{ 
+                flex: 1, 
+                justifyContent: 'center', 
+                alignItems: 'center',
+                padding: 40
+              }}>
+                <Text style={{ fontSize: 48, marginBottom: 16 }}>🏆</Text>
+                <Text style={{ 
+                  fontSize: 18, 
+                  fontWeight: '700', 
+                  color: theme.text.primary,
+                  textAlign: 'center'
+                }}>
+                  No races completed yet
+                </Text>
+                <Text style={{ 
+                  fontSize: 14, 
+                  color: theme.text.tertiary,
+                  textAlign: 'center',
+                  marginTop: 8
+                }}>
+                  Standings will appear here after the first race finishes
+                </Text>
+              </View>
+            ) : roster.length === 0 ? (
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ color: theme.text.secondary }}>Loading racers...</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={roster
+                  .map(racer => ({ 
+                    racer, 
+                    points: standings[racer.id] || 0,
+                    stats: getRacerStats(racer.id, roster, schedule) || { first: 0, second: 0, third: 0, racesRun: 0 }
+                  }))
+                  .sort((a, b) => b.points - a.points)}
+                renderItem={({ item, index }) => (
+                  <StandingsItem racer={item.racer} index={index} points={item.points} stats={item.stats} onPress={handleRacerClick} />
+                )}
+                keyExtractor={(item) => item.racer.id}
+                contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
+              />
+            )}
+          </View>
+        </View>
       )}
 
       {view === 'profile' && selectedRacerId && (
-        <RacerProfile stats={getRacerStats(selectedRacerId, roster, schedule)!} onBack={() => setView('standings')} />
+        <RacerProfile 
+          stats={getRacerStats(selectedRacerId, roster, schedule)!} 
+          currentSeasonPoints={standings[selectedRacerId] || 0}
+          currentSeasonNumber={currentSeasonNumber}
+          onBack={() => goBack()} 
+        />
+      )}
+
+      {view === 'historical-racer-profile' && selectedHistoricalSeason && selectedHistoricalRacerId && (
+        (() => {
+          // Try to use racerStats if available, otherwise generate from finalStandings
+          let historicalStats;
+          if (selectedHistoricalSeason.racerStats && Array.isArray(selectedHistoricalSeason.racerStats)) {
+            historicalStats = selectedHistoricalSeason.racerStats.find((r: any) => r.id === selectedHistoricalRacerId);
+            console.log('Found racer in racerStats:', historicalStats?.name);
+          }
+          
+          if (!historicalStats) {
+            // Fallback: Try to generate from finalStandings and current roster
+            const points = selectedHistoricalSeason.finalStandings?.[selectedHistoricalRacerId];
+            if (points !== undefined) {
+              console.log('Generating fallback racer data from finalStandings for', selectedHistoricalRacerId);
+              
+              // Try to find the actual racer in current roster
+              const actualRacer = roster.find(r => r.id === selectedHistoricalRacerId);
+              
+              if (actualRacer) {
+                historicalStats = {
+                  id: selectedHistoricalRacerId,
+                  name: actualRacer.name,
+                  color: actualRacer.color,
+                  baseSpeed: actualRacer.baseSpeed,
+                  health: actualRacer.health,
+                  strategy: actualRacer.strategy,
+                  trackPreference: actualRacer.trackPreference,
+                  points: points,
+                  first: 0,
+                  second: 0,
+                  third: 0,
+                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                };
+              } else {
+                historicalStats = {
+                  id: selectedHistoricalRacerId,
+                  name: `Racer ${selectedHistoricalRacerId}`,
+                  color: '#888888',
+                  baseSpeed: 50,
+                  health: 100,
+                  strategy: 'balanced' as const,
+                  trackPreference: 'asphalt' as const,
+                  points: points,
+                  first: 0,
+                  second: 0,
+                  third: 0,
+                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                };
+              }
+            }
+          }
+          
+          if (!historicalStats) {
+            console.error('Racer not found in historical season:', selectedHistoricalRacerId);
+            return (
+              <View style={{ flex: 1, padding: 16, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: theme.text.secondary, fontSize: 16 }}>
+                  Racer data not found for this season
+                </Text>
+                <TouchableOpacity
+                  onPress={() => navigate({ view: 'seasons' })}
+                  style={{
+                    backgroundColor: theme.surface.elevated,
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    marginTop: 16
+                  }}
+                >
+                  <Text style={{ color: theme.text.primary, fontWeight: '600' }}>
+                    Back to Seasons
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }
+          
+          return (
+            <RacerProfile 
+              stats={{
+                id: historicalStats.id,
+                name: historicalStats.name,
+                color: historicalStats.color,
+                baseSpeed: historicalStats.baseSpeed,
+                health: historicalStats.health,
+                strategy: historicalStats.strategy as any,
+                trackPreference: historicalStats.trackPreference as any,
+                lane: 0,
+                progress: 0,
+                laps: 0,
+                totalDistance: 0,
+                status: 'finished',
+                currentSpeed: 0,
+                first: historicalStats.first,
+                second: historicalStats.second,
+                third: historicalStats.third,
+                racesRun: selectedHistoricalSeason.totalRaces
+              }}
+              currentSeasonPoints={historicalStats.points}
+              currentSeasonNumber={selectedHistoricalSeason.number}
+              onBack={() => goBack()} 
+            />
+          );
+        })()
+      )}
+
+      {view === 'seasons' && (
+        <SeasonsList 
+          seasons={completedSeasons} 
+          onBack={() => goBack()} 
+          onSelectSeason={(season) => {
+            navigate({ selectedHistoricalSeason: season, view: 'historical-standings' });
+          }}
+          onSelectChampion={(season, racerId) => {
+            navigate({ selectedHistoricalSeason: season, view: 'historical-standings' });
+          }}
+        />
+      )}
+
+      {view === 'historical-standings' && selectedHistoricalSeason && (
+        (() => {
+          // Check if we have valid data to work with
+          if (!selectedHistoricalSeason.finalStandings || typeof selectedHistoricalSeason.finalStandings !== 'object') {
+            console.error('Invalid historical season data: missing finalStandings');
+            return (
+              <View style={{ flex: 1, padding: 16, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: theme.text.secondary, fontSize: 16, marginBottom: 16 }}>
+                  Season data is corrupted or incomplete
+                </Text>
+                <TouchableOpacity
+                  onPress={() => navigate({ view: 'seasons' })}
+                  style={{
+                    backgroundColor: theme.surface.elevated,
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: theme.text.primary, fontWeight: '600' }}>
+                    Back to Seasons
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }
+
+          // Try to use racerStats if available, otherwise merge with current roster data
+          let standingsData;
+          if (selectedHistoricalSeason.racerStats && Array.isArray(selectedHistoricalSeason.racerStats) && selectedHistoricalSeason.racerStats.length > 0) {
+            // Use the saved racerStats which should have full racer info
+            standingsData = selectedHistoricalSeason.racerStats;
+          } else {
+            // Fallback: Merge finalStandings with current roster to get actual racer data
+            standingsData = Object.entries(selectedHistoricalSeason.finalStandings).map(([racerId, points]) => {
+              // Find the actual racer from current roster
+              const actualRacer = roster.find(r => r.id === racerId);
+              
+              if (actualRacer) {
+                // Use actual racer data but with historical points and stats
+                return {
+                  id: racerId,
+                  name: actualRacer.name,
+                  color: actualRacer.color,
+                  baseSpeed: actualRacer.baseSpeed,
+                  health: actualRacer.health,
+                  strategy: actualRacer.strategy,
+                  trackPreference: actualRacer.trackPreference,
+                  points: points as number,
+                  first: 0, // These would come from historical stats if available
+                  second: 0,
+                  third: 0,
+                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                };
+              } else {
+                // Racer not found in current roster, use fallback
+                return {
+                  id: racerId,
+                  name: `Racer ${racerId}`,
+                  color: '#888888',
+                  baseSpeed: 50,
+                  health: 100,
+                  strategy: 'balanced' as const,
+                  trackPreference: 'asphalt' as const,
+                  points: points as number,
+                  first: 0,
+                  second: 0,
+                  third: 0,
+                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                };
+              }
+            });
+          }
+
+          return (
+            <View style={{ flex: 1, padding: 16 }}>
+              <View style={{ 
+                backgroundColor: theme.surface.card, 
+                borderRadius: 24, 
+                flex: 1,
+                overflow: 'hidden'
+              }}>
+                {/* Header */}
+                <View style={{ 
+                  padding: 20,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}>
+                  <View>
+                    <Text style={{ 
+                      fontSize: 24, 
+                      fontWeight: '900', 
+                      color: theme.text.primary,
+                      letterSpacing: -0.5
+                    }}>
+                      Season {selectedHistoricalSeason.number}
+                    </Text>
+                    <Text style={{ 
+                      fontSize: 12, 
+                      color: theme.text.secondary,
+                      marginTop: 4,
+                      fontWeight: '600'
+                    }}>
+                      Final Standings
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                  onPress={() => navigate({ view: 'seasons' })}
+                    style={{
+                      backgroundColor: theme.surface.elevated,
+                      paddingHorizontal: 16,
+                      paddingVertical: 8,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <Text style={{
+                      color: theme.text.primary,
+                      fontWeight: '600',
+                      fontSize: 14,
+                    }}>
+                      Back
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <FlatList
+                  data={standingsData
+                    .sort((a: any, b: any) => b.points - a.points)}
+                  renderItem={({ item, index }) => (
+                    <StandingsItem 
+                      racer={{
+                        id: item.id,
+                        name: item.name,
+                        color: item.color,
+                        baseSpeed: item.baseSpeed,
+                        health: item.health,
+                        strategy: item.strategy as any,
+                        trackPreference: item.trackPreference as any,
+                        lane: 0,
+                        progress: 0,
+                        laps: 0,
+                        totalDistance: 0,
+                        status: 'finished',
+                        currentSpeed: 0
+                      }} 
+                      index={index} 
+                      points={item.points} 
+                      stats={{ first: item.first || 0, second: item.second || 0, third: item.third || 0 }} 
+                      onPress={() => {}} 
+                    />
+                  )}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
+                />
+              </View>
+            </View>
+          );
+        })()
       )}
 
       {view === 'tracks' && (
-        <FlatList
-          data={tracks}
-          renderItem={({ item }) => <TrackItem track={item} />}
-          keyExtractor={(item) => item.id}
-          className="flex-1 mt-2.5"
-          style={{ flex: 1, marginTop: 10 }}
-        />
+        <View style={{ flex: 1, padding: 16 }}>
+          <View style={{ 
+            backgroundColor: theme.surface.card, 
+            borderRadius: 24, 
+            flex: 1,
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <View style={{ 
+              padding: 20,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <View>
+                <Text style={{ 
+                  fontSize: 24, 
+                  fontWeight: '900', 
+                  color: theme.text.primary,
+                  letterSpacing: -0.5
+                }}>
+                  Tracks
+                </Text>
+                <Text style={{ 
+                  fontSize: 12, 
+                  color: theme.text.secondary,
+                  marginTop: 4,
+                  fontWeight: '600'
+                }}>
+                  {tracks.length} Track{tracks.length !== 1 ? 's' : ''}
+                </Text>
+              </View>
+            </View>
+            <FlatList
+              data={tracks}
+              renderItem={({ item }) => <TrackItem track={item} />}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
+            />
+          </View>
+        </View>
       )}
     </SafeAreaView>
   );

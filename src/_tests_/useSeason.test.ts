@@ -5,7 +5,7 @@ describe('useSeason', () => {
   it('initializes with a roster and schedule', () => {
     const { result } = renderHook(() => useSeason());
     expect(result.current.roster.length).toBeGreaterThan(0);
-    expect(result.current.schedule.length).toBe(10);
+    expect(result.current.schedule.length).toBe(144);
     expect(result.current.nextRace).toBeDefined();
     expect(result.current.tracks.length).toBeGreaterThan(0);
   });

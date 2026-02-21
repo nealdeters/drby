@@ -8,11 +8,14 @@ interface Racer {
   color: string;
   baseSpeed: number;
   health: number;
+  strategy: 'aggressive' | 'conservative' | 'balanced';
   progress: number;
   laps: number;
   totalDistance: number;
   status: 'active' | 'finished' | 'injured' | 'waiting';
   finishTime?: number;
+  position?: number; // Current race position (1-based)
+  trackPreference: 'asphalt' | 'dirt' | 'grass';
 }
 
 interface RaceUpdate {
@@ -69,17 +72,24 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const channel = ably.channels.get(`race:${raceId}`);
 
   // Initialize race state
-  const raceRacers: Racer[] = racers.map((r: any) => ({
+  const raceRacers: Racer[] = racers.map((r: any, index: number) => ({
     ...r,
+    strategy: r.strategy || 'balanced', // Default to balanced if not specified
+    health: r.health || 100,
     progress: 0,
     laps: 0,
     totalDistance: 0,
     status: 'active' as const,
+    lane: Math.min(index + 1, 8), // Lane 1-N (1-based indexing), max 8 lanes
+    position: index + 1, // Initial position
   }));
 
   const totalDistance = track.length * track.laps;
-  const updateInterval = 200; // 200ms = 5 updates/sec (faster pace)
+  const updateInterval = 100; // 100ms = 10 updates/sec (keeps under Ably rate limit)
   const startTime = Date.now();
+
+  console.log(`🏁 Race debug: track.length=${track.length}, track.laps=${track.laps}, totalDistance=${totalDistance}`);
+  console.log(`🏁 Race debug: racers[0].baseSpeed=${racers[0]?.baseSpeed}, racers[0].name=${racers[0]?.name}, raceId=${raceId}`);
 
   // Publish race started
   await channel.publish('race-update', {
@@ -93,40 +103,159 @@ export const handler: Handler = async (event: HandlerEvent) => {
     }, {}),
   } as RaceUpdate);
 
-  console.log(`🏁 Starting race ${raceId} with ${racers.length} racers`);
+  console.log(`🏁 Starting race ${raceId} with ${racers.length} racers, totalDistance=${totalDistance}m`);
 
   // Race simulation
   const raceInterval = setInterval(async () => {
+    try {
     const now = Date.now();
     const elapsed = now - startTime;
 
     let allFinished = true;
+    let tickCount = 0;
+    
+    // Debug: log first few ticks
+    if (elapsed < 500) {
+      console.log(`🏃 Tick at ${elapsed}ms: ${raceRacers.map(r => `${r.name}:${r.totalDistance.toFixed(1)}m`).join(', ')}`);
+    }
+    
+    // Debug: log when race should end
+    const maxDistance = Math.max(...raceRacers.map(r => r.totalDistance));
+    if (maxDistance >= totalDistance * 0.9 && elapsed < 600) {
+      console.log(`🏁 ${raceId}: maxDistance=${maxDistance.toFixed(1)}, totalDistance=${totalDistance}`);
+    }
     const progressMap: Record<string, number> = {};
+    
+    // Calculate current positions based on total distance - only update every few seconds to prevent acceleration
+    const shouldUpdatePositions = Math.floor(elapsed / 5000) > Math.floor((elapsed - updateInterval) / 5000); // Every 5 seconds
+    if (shouldUpdatePositions) {
+      const positions = [...raceRacers]
+        .filter(r => r.status === 'active')
+        .sort((a, b) => b.totalDistance - a.totalDistance)
+        .map((racer, index) => ({ id: racer.id, position: index + 1 }));
+      
+      // Update racer positions
+      positions.forEach(({ id, position }) => {
+        const racer = raceRacers.find(r => r.id === id);
+        if (racer) racer.position = position;
+      });
+    } else {
+      // Keep existing positions if not updating to maintain consistency
+      for (const racer of raceRacers) {
+        if (racer.status === 'active' && !racer.position) {
+          racer.position = 1; // Default position if not set
+        }
+      }
+    }
 
     for (const racer of raceRacers) {
       if (racer.status !== 'active') continue;
 
-      // Calculate speed with randomness (faster pace)
-      const speedVariance = 0.9 + Math.random() * 0.2; // 90% to 110% of base speed
-      const speed = racer.baseSpeed * speedVariance * (updateInterval / 1000) * 1.5; // 150% speed multiplier for faster race
+      // Health decay during race based on strategy (per tick, ~30 ticks/sec)
+      // Aggressive: loses health fastest - starts fast but tires quickly
+      // Balanced: moderate decay - steady throughout
+      // Conservative: slowest decay - maintains energy
+      const healthDecayRates = {
+        aggressive: 0.012,    // ~0.36 health per second (fastest burn)
+        balanced: 0.006,      // ~0.18 health per second (moderate)
+        conservative: 0.003  // ~0.09 health per second (slowest burn)
+      };
+      const decayRate = healthDecayRates[racer.strategy] || healthDecayRates.balanced;
+      racer.health = Math.max(0, (racer.health || 100) - decayRate);
+      const currentHealth = racer.health;
+
+      // Base speed variance - unique per racer but bounded
+      const speedVariance = 0.92 + ((racer.id.charCodeAt(0) % 20) / 100); // 92% to 112% variation
+      const baseSpeed = racer.baseSpeed * (updateInterval / 1000);
       
-      racer.totalDistance += speed;
-      racer.progress = (racer.totalDistance % track.length) / track.length;
+      // Track preference penalties/bonuses
+      let trackPenalty = 0;
+      if (racer.trackPreference === 'asphalt' && track.surface === 'dirt') {
+        trackPenalty = 0.25;
+      } else if (racer.trackPreference === 'dirt' && track.surface === 'asphalt') {
+        trackPenalty = 0.25;
+      } else if (racer.trackPreference === 'grass') {
+        trackPenalty = -0.1;
+      }
+      
+      // Fatigue penalty increases as health decreases
+      const fatiguePenalty = Math.max(0, (100 - currentHealth) / 200);
+      
+      // Speed variance - small random fluctuation that can go up OR down
+      // Aggressive gets more variance early but less as health drops
+      // Conservative gets steadier variance throughout
+      const strategyVariance = {
+        aggressive: 0.15,   // High variance - big speed swings
+        balanced: 0.08,    // Moderate variance
+        conservative: 0.04 // Low variance - steadier pace
+      };
+      const varianceCap = strategyVariance[racer.strategy] || strategyVariance.balanced;
+      
+      // Random speed adjustment - can be positive OR negative, bounded
+      const speedAdjustment = (Math.random() - 0.5) * 2 * varianceCap; // -varianceCap to +varianceCap
+      
+      // Final speed with bounded variance + fatigue penalty
+      const finalSpeed = baseSpeed * speedVariance * (1 + speedAdjustment - fatiguePenalty - trackPenalty);
+      
+      // Debug: log first tick speed
+      if (elapsed < 500 && raceRacers.indexOf(racer) === 0) {
+        console.log(`🏃 ${racer.name}: baseSpeed=${baseSpeed.toFixed(2)}, variance=${speedVariance.toFixed(2)}, adjust=${speedAdjustment.toFixed(2)}, fatigue=${fatiguePenalty.toFixed(2)}, final=${finalSpeed.toFixed(2)}`);
+      }
+      
+      const previousLaps = racer.laps;
+      racer.totalDistance += finalSpeed;
+      
+      // Calculate lap progress - distance into current lap
+      const currentLapDistance = racer.totalDistance % track.length;
       racer.laps = Math.floor(racer.totalDistance / track.length);
-      progressMap[racer.id] = Math.min(1, racer.totalDistance / totalDistance);
+      
+      // Handle lap completion - reset progress to 0 at lap boundaries
+      const wasLapCompleted = racer.laps > previousLaps;
+      if (wasLapCompleted) {
+        racer.progress = 0;
+        
+        // Injury chance increases significantly at lower health (1% base + up to 4% more at critical health)
+        const injuryChance = 0.01 * (1 + Math.pow((100 - racer.health) / 100, 2) * 4);
+        if (Math.random() < injuryChance && racer.health < 85) {
+          racer.status = 'injured';
+          racer.health = Math.max(0, racer.health - 25); // Significant health reduction on injury
+          console.log(`🏥 ${racer.name} was injured during lap ${racer.laps}! Health: ${racer.health}`);
+          continue; // Skip further processing for injured racer
+        }
+      } else {
+        // Only update progress if not at a lap boundary
+        racer.progress = currentLapDistance / track.length;
+      }
+      
+      // Calculate progress as a percentage of total race distance (0-1)
+      // This ensures racers complete all laps before finishing
+      const raceProgress = Math.min(1, racer.totalDistance / totalDistance);
+      progressMap[racer.id] = raceProgress;
+      
+      // Also track lap-specific progress for visual representation
+      const lapProgress = currentLapDistance / track.length;
+      // Store both race progress and current lap progress in the progress map
+      // This allows the frontend to handle multi-lap visualization correctly
 
       // Check if finished
       if (racer.totalDistance >= totalDistance) {
+        console.log(`🏁 ${racer.name} finished! distance=${racer.totalDistance}, totalDistance=${totalDistance}`);
         racer.status = 'finished';
         racer.finishTime = elapsed;
         // Cap distance at exact total to prevent overruns (e.g., 4003m instead of 4000m)
         racer.totalDistance = totalDistance;
-        // Ensure lap count shows complete
+        // Ensure lap count and progress align perfectly with completion
         racer.laps = track.laps;
         racer.progress = 1;
       } else {
         allFinished = false;
       }
+    }
+    
+    // Debug: log allFinished status
+    if (elapsed < 600) {
+      const finishedCount = raceRacers.filter(r => r.status === 'finished').length;
+      console.log(`🏁 Tick ${elapsed}ms: allFinished=${allFinished}, finished=${finishedCount}/${raceRacers.length}`);
     }
 
     try {
@@ -180,6 +309,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
       } catch (err) {
         console.error('Failed to save race results:', err);
       }
+    }
+    } catch (err) {
+      console.error(`🏁 Race loop error for ${raceId}:`, err);
     }
   }, updateInterval);
 

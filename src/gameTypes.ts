@@ -39,4 +39,4 @@ export interface RaceEvent {
   results?: string[]; // racerIds in order of finish
 }
 
-export type ViewState = 'race' | 'roster' | 'standings' | 'season' | 'profile' | 'tracks';
+export type ViewState = 'race' | 'roster' | 'standings' | 'season' | 'seasons' | 'profile' | 'tracks' | 'historical-standings' | 'historical-racer-profile';

@@ -20,6 +20,16 @@ interface RaceUpdate {
   progressMap?: Record<string, number>;
 }
 
+// Validate race update to prevent stale data
+const validateRaceUpdate = (update: RaceUpdate, currentRaceId: string): boolean => {
+  const now = Date.now();
+  const isValidRaceId = update.raceId === currentRaceId;
+  const isRecent = (now - update.timestamp) < 30000; // Reject updates older than 30 seconds
+  const isNotFuture = update.timestamp <= now + 5000; // Reject updates more than 5 seconds in future
+  
+  return isValidRaceId && isRecent && isNotFuture;
+};
+
 export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFinish }: UseRaceProps) => {
   // React State for the UI List (throttled updates)
   const [racers, setRacers] = useState<Racer[]>([]);
@@ -86,6 +96,12 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
         const update = message.data as RaceUpdate;
         const now = Date.now();
         
+        // Validate race update to prevent stale or invalid data
+        if (!validateRaceUpdate(update, raceId)) {
+          console.warn(`Invalid race update rejected for race ${raceId}:`, update);
+          return;
+        }
+        
         if (update.type === 'started') {
           console.log('🚀 Race started');
           setIsRacing(true);
@@ -99,17 +115,26 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
             // Update shared values for smooth animation
             Object.entries(update.progressMap).forEach(([racerId, progress]) => {
               if (progressMap[racerId]) {
-                progressMap[racerId].value = withTiming(progress, { duration: 200 });
+                progressMap[racerId].value = withTiming(progress, { duration: 33 });
               }
             });
           }
           
           if (update.racers) {
-            racersRef.current = update.racers;
+            // Preserve lane assignments to prevent lane switching
+            const updatedRacers = update.racers.map(updatedRacer => {
+              const currentRacer = racersRef.current.find(r => r.id === updatedRacer.id);
+              return {
+                ...updatedRacer,
+                lane: currentRacer?.lane ?? updatedRacer.lane // Preserve existing lane assignment
+              };
+            });
             
-            // Throttle React state updates to every 400ms (faster UI updates)
-            if (now - lastStateUpdate.current > 400) {
-              setRacers(update.racers);
+            racersRef.current = updatedRacers;
+            
+            // Throttle React state updates to every 100ms for smoother UI updates
+            if (now - lastStateUpdate.current > 100) {
+              setRacers(updatedRacers);
               lastStateUpdate.current = now;
             }
           }
@@ -139,12 +164,13 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
   useEffect(() => {
     const newRacers = inputRacers.map((r, index) => ({
       ...r,
-      lane: index % 8,
+      lane: r.lane ?? Math.min(index + 1, 8), // Lane 1-N (1-based indexing), max 8 lanes
       progress: 0,
       totalDistance: 0,
       laps: 0,
       status: 'waiting' as const,
-      currentSpeed: 0
+      currentSpeed: 0,
+      position: index + 1
     }));
     racersRef.current = newRacers;
     setRacers(newRacers);
@@ -156,6 +182,14 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
       progressMap[key].value = 0;
     });
   }, [inputRacers, track, progressMap]);
+
+  // Cleanup on unmount and when race finishes
+  useEffect(() => {
+    if (!isRacing && currentRaceId.current) {
+      cleanup();
+      currentRaceId.current = '';
+    }
+  }, [isRacing, cleanup]);
 
   // Cleanup on unmount
   useEffect(() => {

@@ -2,11 +2,95 @@
 @tailwind components;
 @tailwind utilities;
 
+/* CSS Variables for Theming - Change these values to swap themes */
+:root {
+  /* Primary Brand Colors */
+  --drby-primary-50: #f0f7f2;
+  --drby-primary-100: #d9efdf;
+  --drby-primary-200: #b3dfb8;
+  --drby-primary-300: #8cc98f;
+  --drby-primary-400: #66b066;
+  --drby-primary-500: #4A895C;
+  --drby-primary-600: #3A6A4A;
+  --drby-primary-700: #2A4B38;
+  --drby-primary-800: #1A2C26;
+  --drby-primary-900: #0A0D14;
+  
+  /* Semantic Colors */
+  --drby-success: #22c55e;
+  --drby-warning: #f59e0b;
+  --drby-error: #ef4444;
+  --drby-gold: #fbbf24;
+  
+  /* Surfaces */
+  --drby-surface-page: var(--drby-primary-500);
+  --drby-surface-card: var(--drby-primary-600);
+  --drby-surface-card-light: var(--drby-primary-50);
+  --drby-surface-elevated: var(--drby-primary-500);
+  --drby-surface-dark: var(--drby-primary-700);
+  --drby-surface-darkest: var(--drby-primary-800);
+  
+  /* Text */
+  --drby-text-primary: var(--drby-primary-50);
+  --drby-text-secondary: var(--drby-primary-100);
+  --drby-text-muted: var(--drby-primary-200);
+  --drby-text-tertiary: var(--drby-primary-300);
+  --drby-text-on-light: var(--drby-primary-800);
+  --drby-text-on-light-secondary: var(--drby-primary-600);
+  
+  /* Borders */
+  --drby-border-default: var(--drby-primary-400);
+  --drby-border-subtle: var(--drby-primary-500);
+}
+
 /* Ensure the root element fills the viewport so flex-1 works */
 html, body, #root {
   height: 100%;
   width: 100%;
   display: flex;
   flex-direction: column;
-  background-color: #121212;
+  background-color: var(--drby-surface-page);
+}
+
+/* Utility classes for consistent card layouts */
+@layer components {
+  .drby-card {
+    background-color: var(--drby-surface-card);
+    padding: 20px;
+    margin-bottom: 16px;
+    margin-left: 16px;
+    margin-right: 16px;
+    border-radius: 24px;
+  }
+  
+  .drby-card-light {
+    background-color: var(--drby-surface-card-light);
+    padding: 20px;
+    margin-bottom: 16px;
+    margin-left: 16px;
+    margin-right: 16px;
+    border-radius: 24px;
+  }
+  
+  .drby-section {
+    background-color: var(--drby-surface-elevated);
+    padding: 20px;
+    border-radius: 16px;
+  }
+  
+  .drby-text-primary {
+    color: var(--drby-text-primary);
+  }
+  
+  .drby-text-secondary {
+    color: var(--drby-text-secondary);
+  }
+  
+  .drby-text-muted {
+    color: var(--drby-text-muted);
+  }
+  
+  .drby-text-tertiary {
+    color: var(--drby-text-tertiary);
+  }
 }

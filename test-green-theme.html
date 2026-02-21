@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DRBY Green Theme Test</title>
+    <style>
+        :root {
+            --drby-green-50: #f0f7f2;
+            --drby-green-100: #d9efdf;
+            --drby-green-200: #b3dfb8;
+            --drby-green-300: #8cc98f;
+            --drby-green-400: #66b066;
+            --drby-green-500: #4A895C;
+            --drby-green-600: #3A6A4A;
+            --drby-green-700: #2A4B38;
+            --drby-green-800: #1A2C26;
+            --drby-green-900: #0A0D14;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--drby-green-500);
+            color: white;
+        }
+        
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .color-swatch {
+            padding: 20px;
+            text-align: center;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        
+        .green-50 { background-color: var(--drby-green-50); color: var(--drby-green-800); }
+        .green-100 { background-color: var(--drby-green-100); color: var(--drby-green-800); }
+        .green-200 { background-color: var(--drby-green-200); color: var(--drby-green-800); }
+        .green-300 { background-color: var(--drby-green-300); color: var(--drby-green-800); }
+        .green-400 { background-color: var(--drby-green-400); color: white; }
+        .green-500 { background-color: var(--drby-green-500); color: white; }
+        .green-600 { background-color: var(--drby-green-600); color: white; }
+        .green-700 { background-color: var(--drby-green-700); color: white; }
+        .green-800 { background-color: var(--drby-green-800); color: white; }
+        .green-900 { background-color: var(--drby-green-900); color: white; }
+        
+        .component-demo {
+            background-color: var(--drby-green-50);
+            color: var(--drby-green-800);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 10px 0;
+        }
+        
+        .racer-card {
+            background-color: var(--drby-green-50);
+            color: var(--drby-green-800);
+            padding: 15px;
+            border-radius: 16px;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .racer-number {
+            background-color: var(--drby-green-700);
+            color: var(--drby-green-50);
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .timer {
+            background-color: var(--drby-green-600);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🌿 DRBY Green Theme Preview</h1>
+    <p>This page demonstrates the new green color palette for the DRBY racing app.</p>
+    
+    <h2>Color Palette</h2>
+    <div class="color-palette">
+        <div class="color-swatch green-50">Green 50<br>#f0f7f2</div>
+        <div class="color-swatch green-100">Green 100<br>#d9efdf</div>
+        <div class="color-swatch green-200">Green 200<br>#b3dfb8</div>
+        <div class="color-swatch green-300">Green 300<br>#8cc98f</div>
+        <div class="color-swatch green-400">Green 400<br>#66b066</div>
+        <div class="color-swatch green-500">Green 500<br>#4A895C</div>
+        <div class="color-swatch green-600">Green 600<br>#3A6A4A</div>
+        <div class="color-swatch green-700">Green 700<br>#2A4B38</div>
+        <div class="color-swatch green-800">Green 800<br>#1A2C26</div>
+        <div class="color-swatch green-900">Green 900<br>#0A0D14</div>
+    </div>
+    
+    <h2>Component Examples</h2>
+    
+    <div class="component-demo">
+        <h3>Main App Background</h3>
+        <p>This is the main app background color (#4A895C)</p>
+    </div>
+    
+    <div class="racer-card">
+        <div class="racer-number">01</div>
+        <div>
+            <strong>Speed Racer</strong><br>
+            <small>Lap 3 | Strategy: Balanced</small>
+        </div>
+    </div>
+    
+    <div class="timer">
+        ⏱️ Next Race: 05:32
+    </div>
+    
+    <div class="component-demo">
+        <h3>Light Background Components</h3>
+        <p>Cards and containers use the lighter green shades for better contrast and readability.</p>
+    </div>
+    
+    <h2>Theme Benefits</h2>
+    <ul>
+        <li>✅ Fresh, natural green color that's easy on the eyes</li>
+        <li>✅ Good contrast ratios for accessibility</li>
+        <li>✅ Cohesive color scheme with multiple shade variations</li>
+        <li>✅ Professional racing app aesthetic</li>
+        <li>✅ Consistent with outdoor/racing themes</li>
+    </ul>
+    
+    <p><em>The green theme has been successfully applied to your DRBY racing app!</em></p>
+</body>
+</html>

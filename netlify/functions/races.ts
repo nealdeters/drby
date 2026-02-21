@@ -3,6 +3,8 @@ import { getStore } from "@netlify/blobs";
 
 const SCHEDULE_KEY = 'season-schedule';
 const STANDINGS_KEY = 'season-standings';
+const COMPLETED_SEASONS_KEY = 'completed-seasons';
+const SEASON_NUMBER_KEY = 'current-season-number';
 
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.headers["x-api-key"] !== process.env.API_KEY) {
@@ -22,6 +24,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const pathId = segments.length > 3 ? segments[segments.length - 1] : null;
   const isScheduleRequest = segments.length > 3 && segments[segments.length - 1] === 'schedule';
   const isStandingsRequest = segments.length > 3 && segments[segments.length - 1] === 'standings';
+  const isCompletedSeasonsRequest = segments.length > 3 && segments[segments.length - 1] === 'completed-seasons';
+  const isSeasonNumberRequest = segments.length > 3 && segments[segments.length - 1] === 'season-number';
 
   try {
     const method = event.httpMethod;
@@ -52,24 +56,106 @@ export const handler: Handler = async (event: HandlerEvent) => {
       return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
     }
 
+    // Handle completed seasons endpoint
+    if (isCompletedSeasonsRequest) {
+      if (method === 'GET') {
+        try {
+          const data = await store.get(COMPLETED_SEASONS_KEY);
+          return { 
+            statusCode: 200, 
+            headers: { "Content-Type": "application/json" }, 
+            body: String(data || '[]') 
+          };
+        } catch {
+          return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: '[]' };
+        }
+      }
+      
+      if (method === 'POST') {
+        const body = event.body || '{}';
+        const { seasons } = JSON.parse(body);
+        await store.set(COMPLETED_SEASONS_KEY, JSON.stringify(seasons || []));
+        return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true }) };
+      }
+      
+      return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+    }
+
+    // Handle season number endpoint
+    if (isSeasonNumberRequest) {
+      if (method === 'GET') {
+        try {
+          const data = await store.get(SEASON_NUMBER_KEY);
+          const number = data ? JSON.parse(String(data)) : 1;
+          return { 
+            statusCode: 200, 
+            headers: { "Content-Type": "application/json" }, 
+            body: JSON.stringify({ number }) 
+          };
+        } catch {
+          return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ number: 1 }) };
+        }
+      }
+      
+      if (method === 'POST') {
+        const body = event.body || '{}';
+        const { number } = JSON.parse(body);
+        await store.set(SEASON_NUMBER_KEY, JSON.stringify(number || 1));
+        return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true }) };
+      }
+      
+      return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+    }
+
     // Handle standings endpoint - dynamically calculated from race results
     if (isStandingsRequest) {
       if (method === 'GET') {
-        try {
-          // Get all races to calculate standings dynamically
+         try {
+          // Get current season number first
+          let currentSeasonNumber = 1;
+          try {
+            const seasonNumData = await store.get(SEASON_NUMBER_KEY);
+            if (seasonNumData) {
+              const parsed = JSON.parse(String(seasonNumData));
+              currentSeasonNumber = parsed.number || 1;
+            }
+          } catch (err) {
+            console.log('Could not get current season number, defaulting to 1');
+          }
+          
+          // Get all races to calculate standings dynamically, but only for current season
           const { blobs } = await store.list();
           const races = await Promise.all(
             blobs
-              .filter(b => b.key !== SCHEDULE_KEY && b.key !== STANDINGS_KEY)
+              .filter(b => b.key !== SCHEDULE_KEY && b.key !== STANDINGS_KEY && b.key !== COMPLETED_SEASONS_KEY && b.key !== SEASON_NUMBER_KEY)
               .map(async (b) => {
                 const data = await store.get(b.key);
                 return JSON.parse(String(data));
               })
           );
           
-          // Calculate standings from race results
+          // Filter races to only include current season races
+          const currentSeasonRaces = races.filter(race => {
+            // Race IDs are formatted as: s{seasonNum}-race-{i}-{timestamp}
+            // For example: s1-race-0-1234567890
+            return race.id && race.id.startsWith(`s${currentSeasonNumber}-`);
+          });
+          
+          console.log(`📊 Found ${currentSeasonRaces.length} races for season ${currentSeasonNumber} out of ${races.length} total races`);
+          
+          // Calculate standings from race results - only for current season
           const standings: Record<string, number> = {};
-          races.forEach(race => {
+          const processedRaces = new Set<string>(); // Track processed race IDs to avoid duplicates
+          
+          currentSeasonRaces.forEach(race => {
+            // Skip if this race ID has already been processed (prevent duplicate counting)
+            if (!race.id || processedRaces.has(race.id)) {
+              console.log('⚠️ Skipping duplicate or invalid race:', race.id);
+              return;
+            }
+            
+            processedRaces.add(race.id);
+            
             if (race.results && Array.isArray(race.results)) {
               // 1st place: 5 points
               if (race.results[0]) {
@@ -86,7 +172,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
             }
           });
           
-          console.log('📊 Calculated standings from', races.length, 'races:', standings);
+          console.log('📊 Calculated standings from', processedRaces.size, 'unique races for season', currentSeasonNumber, ':', standings);
           return { 
             statusCode: 200, 
             headers: { "Content-Type": "application/json" }, 

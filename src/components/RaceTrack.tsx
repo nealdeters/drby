@@ -23,52 +23,55 @@ const CY = TRACK_HEIGHT / 2;
 const R_BASE = 70; // Radius of the turns
 const S_LEN = 200; // Length of the straightaways
 
-const RacerDot = ({ racer, progress, laneIndex, totalLanes }: { racer: Racer; progress: SharedValue<number>; laneIndex: number; totalLanes: number }) => {
+const RacerDot = ({ racer, progress, laneIndex, totalLanes, totalLaps }: { racer: Racer; progress: SharedValue<number>; laneIndex: number; totalLanes: number; totalLaps: number }) => {
   if (!progress) return null;
 
-  // Animate position based on progress (0 to 1)
   // Each racer gets their own lane with proper spacing
   // Distribute lanes evenly across the track width
   const laneSpacing = 18; // Pixels between lane centers
   const laneOffset = (laneIndex - (totalLanes - 1) / 2) * laneSpacing;
   const R = R_BASE + 70 + laneOffset; // Start from inner track edge
   const S = S_LEN;
-  const pathLen = 2 * S + 2 * Math.PI * R;
+  const singleLapPathLen = 2 * S + 2 * Math.PI * R;
 
   const animatedProps = useAnimatedProps(() => {
-    const dist = progress.value * pathLen;
+    // progress.value is total race progress (0-1)
+    // Calculate which "virtual lap" we're on (can exceed total laps during final lap)
+    const virtualLapNumber = progress.value * totalLaps;
+    const currentLapDistance = (virtualLapNumber % 1) * singleLapPathLen;
+    
     let x = CX;
     let y = CY;
 
     // Logic to follow stadium path starting Top Center, moving CCW
     // 1. Top Straight (Left half)
-    if (dist < S / 2) {
-      x = CX - dist;
+    if (currentLapDistance < S / 2) {
+      x = CX - currentLapDistance;
       y = CY - R;
     } 
     // 2. Left Turn
-    else if (dist < S / 2 + Math.PI * R) {
-      const dArc = dist - S / 2;
+    else if (currentLapDistance < S / 2 + Math.PI * R) {
+      const dArc = currentLapDistance - S / 2;
       const angle = 1.5 * Math.PI - (dArc / R); // 270 -> 90
       x = (CX - S / 2) + R * Math.cos(angle);
       y = CY + R * Math.sin(angle);
     }
     // 3. Bottom Straight
-    else if (dist < S / 2 + Math.PI * R + S) {
-      const dStr = dist - (S / 2 + Math.PI * R);
+    else if (currentLapDistance < S / 2 + Math.PI * R + S) {
+      const dStr = currentLapDistance - (S / 2 + Math.PI * R);
       x = (CX - S / 2) + dStr;
       y = CY + R;
     }
     // 4. Right Turn
-    else if (dist < S / 2 + Math.PI * R + S + Math.PI * R) {
-      const dArc = dist - (S / 2 + Math.PI * R + S);
+    else if (currentLapDistance < S / 2 + Math.PI * R + S + Math.PI * R) {
+      const dArc = currentLapDistance - (S / 2 + Math.PI * R + S);
       const angle = 0.5 * Math.PI - (dArc / R); // 90 -> -90
       x = (CX + S / 2) + R * Math.cos(angle);
       y = CY + R * Math.sin(angle);
     }
     // 5. Top Straight (Right half)
     else {
-      const dStr = dist - (S / 2 + 2 * Math.PI * R + S);
+      const dStr = currentLapDistance - (S / 2 + 2 * Math.PI * R + S);
       x = (CX + S / 2) - dStr;
       y = CY - R;
     }
@@ -118,8 +121,8 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
 
   return (
     <View 
-      className="flex-1 items-center justify-center bg-[#020617] rounded-3xl m-2 overflow-hidden"
-      style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#020617', borderRadius: 24, margin: 8, overflow: 'hidden' }}
+      className="flex-1 items-center justify-center bg-[#4A895C] rounded-3xl m-2 overflow-hidden"
+      style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#4A895C', borderRadius: 24, margin: 8, overflow: 'hidden' }}
     >
       <Svg height={TRACK_HEIGHT} width={TRACK_WIDTH} viewBox={`0 0 ${TRACK_WIDTH} ${TRACK_HEIGHT}`}>
         {/* Track Surface */}
@@ -147,9 +150,9 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
         />
         
         {/* Lane Dividers */}
-        {racers.map((_, index) => {
+        {Array.from({ length: Math.max(8, racers.length) }, (_, index) => {
           const laneSpacing = 18;
-          const laneOffset = (index - (racers.length - 1) / 2) * laneSpacing;
+          const laneOffset = (index - (Math.max(8, racers.length) - 1) / 2) * laneSpacing;
           const R = R_BASE + 70 + laneOffset;
           return (
             <Path
@@ -172,7 +175,7 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
         {/* Inner Field (Grass) */}
         <Path
           d={getStadiumPath(-10)}
-          fill="#020617"
+          fill="#4A895C"
           stroke="#1e293b"
           strokeWidth={2}
         />
@@ -182,18 +185,19 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
            {/* Checkered Line */}
            <Line x1={CX} y1={CY - R_BASE + 10} x2={CX} y2={CY - R_BASE - 150} stroke="rgba(255,255,255,0.5)" strokeWidth={4} strokeDasharray="4,4" />
            {/* Finish Post */}
-           <Rect x={CX - 2} y={CY - R_BASE - 150} width={4} height={160} fill="#6366f1" />
-           <Circle cx={CX} cy={CY - R_BASE - 150} r={6} fill="#6366f1" />
+           <Rect x={CX - 2} y={CY - R_BASE - 150} width={4} height={160} fill="#ffffff" />
+           <Circle cx={CX} cy={CY - R_BASE - 150} r={6} fill="#ffffff" />
         </G>
 
         {/* Racers */}
-        {racers.map((racer, index) => (
+        {racers.map((racer) => (
           <RacerDot 
             key={racer.id} 
             racer={racer} 
             progress={progressMap[racer.id]}
-            laneIndex={index}
-            totalLanes={racers.length}
+            laneIndex={racer.lane - 1} // Convert 1-based lane to 0-based index for calculations
+            totalLanes={Math.max(8, racers.length)}
+            totalLaps={track.laps}
           />
         ))}
       </Svg>

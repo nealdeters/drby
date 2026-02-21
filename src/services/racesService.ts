@@ -81,5 +81,37 @@ export const racesService = {
       body: JSON.stringify({ standings }),
     });
     if (!response.ok) throw new Error('Failed to save standings');
+  },
+
+  // Completed seasons persistence methods
+  async getCompletedSeasons(): Promise<any[]> {
+    const response = await fetch(`${API_URL}/races/completed-seasons`, { headers });
+    if (!response.ok) throw new Error('Failed to fetch completed seasons');
+    return response.json();
+  },
+
+  async saveCompletedSeasons(seasons: any[]): Promise<void> {
+    const response = await fetch(`${API_URL}/races/completed-seasons`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ seasons }),
+    });
+    if (!response.ok) throw new Error('Failed to save completed seasons');
+  },
+
+  async getCurrentSeasonNumber(): Promise<number> {
+    const response = await fetch(`${API_URL}/races/season-number`, { headers });
+    if (!response.ok) throw new Error('Failed to fetch season number');
+    const data = await response.json();
+    return data.number || 1;
+  },
+
+  async saveCurrentSeasonNumber(number: number): Promise<void> {
+    const response = await fetch(`${API_URL}/races/season-number`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ number }),
+    });
+    if (!response.ok) throw new Error('Failed to save season number');
   }
 };

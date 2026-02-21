@@ -4,7 +4,7 @@ module.exports = {
     '^react-native$': 'react-native-web',
     '\\.(css|less|scss|sass)$': '<rootDir>/styleMock.cjs',
   },
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   transform: {
     '^.+\\.(js|jsx|ts|tsx)$': 'babel-jest',
   },
