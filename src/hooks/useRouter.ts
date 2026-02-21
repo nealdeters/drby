@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 
 export type ViewState = 
   | 'race' 
+  | 'schedule'
   | 'standings' 
   | 'profile' 
   | 'seasons' 
@@ -62,7 +63,7 @@ export const useRouter = () => {
     console.log('🔍 Parsing URL:', window.location.search);
     
     const view = params.get('view') as ViewState;
-    if (view && ['race', 'standings', 'profile', 'seasons', 'historical-standings', 'historical-racer-profile', 'tracks'].includes(view)) {
+    if (view && ['race', 'schedule', 'standings', 'profile', 'seasons', 'historical-standings', 'historical-racer-profile', 'tracks'].includes(view)) {
       newState.view = view;
       console.log('🔍 Restored view:', view);
     }

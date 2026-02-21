@@ -17,6 +17,7 @@ import { TrackItem } from './components/TrackItem';
 import { RacerProfile } from './components/RacerProfile';
 import { HamburgerMenu } from './components/HamburgerMenu';
 import { SeasonsList } from './components/SeasonsList';
+import { ScheduleList } from './components/ScheduleList';
 import { theme } from './theme';
 
 const LOADING_TRACK: Track = { id: '0', name: 'Loading', surface: 'asphalt', length: 1000, laps: 3 };
@@ -335,10 +336,11 @@ export default function App() {
             <Text className="text-3xl font-black italic tracking-tighter" style={{ fontSize: 30, fontWeight: '900', fontStyle: 'italic', color: theme.text.primary, letterSpacing: -1 }}>DRBY<Text style={{ color: theme.primary[600] }}>.</Text></Text>
           </TouchableOpacity>
           
-          {/* Desktop Navigation */}
-          {!isMobile && (
+           {/* Desktop Navigation */}
+           {!isMobile && (
              <View className="flex-row p-1.5 rounded-full" style={{ flexDirection: 'row', backgroundColor: theme.surface.card, padding: 6, borderRadius: 999 }}>
                <TabButton title="Race" active={view === 'race'} onPress={() => navigate({ view: 'race' })} />
+               <TabButton title="Schedule" active={view === 'schedule'} onPress={() => navigate({ view: 'schedule' })} />
                <TabButton title="Standings" active={view === 'standings'} onPress={() => navigate({ view: 'standings' })} />
                <TabButton title="Seasons" active={view === 'seasons'} onPress={() => navigate({ view: 'seasons' })} />
                <TabButton title="Tracks" active={view === 'tracks'} onPress={() => navigate({ view: 'tracks' })} />
@@ -351,17 +353,18 @@ export default function App() {
              <TouchableOpacity onPress={() => setMenuOpen(true)} className="p-2" style={{ padding: 8, marginRight: -8 }}>
                <Text className="text-white text-2xl" style={{ color: 'white', fontSize: 24 }}>☰</Text>
              </TouchableOpacity>
-             <HamburgerMenu
-               visible={menuOpen}
-               onClose={() => setMenuOpen(false)}
-               activeView={view}
-               items={[
-                  { id: 'race', title: 'Race', onPress: () => navigate({ view: 'race' }) },
-                  { id: 'standings', title: 'Standings', onPress: () => navigate({ view: 'standings' }) },
-                  { id: 'seasons', title: 'Seasons', onPress: () => navigate({ view: 'seasons' }) },
-                  { id: 'tracks', title: 'Tracks', onPress: () => navigate({ view: 'tracks' }) },
-               ]}
-             />
+              <HamburgerMenu
+                visible={menuOpen}
+                onClose={() => setMenuOpen(false)}
+                activeView={view}
+                items={[
+                   { id: 'race', title: 'Race', onPress: () => navigate({ view: 'race' }) },
+                   { id: 'schedule', title: 'Schedule', onPress: () => navigate({ view: 'schedule' }) },
+                   { id: 'standings', title: 'Standings', onPress: () => navigate({ view: 'standings' }) },
+                   { id: 'seasons', title: 'Seasons', onPress: () => navigate({ view: 'seasons' }) },
+                   { id: 'tracks', title: 'Tracks', onPress: () => navigate({ view: 'tracks' }) },
+                ]}
+              />
            </>
          )}
        </View>
@@ -419,6 +422,14 @@ export default function App() {
             contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
           />
         </ScrollView>
+      )}
+
+      {view === 'schedule' && (
+        <ScheduleList 
+          schedule={schedule} 
+          roster={roster}
+          onBack={() => navigate({ view: 'race' })}
+        />
       )}
 
       {view === 'standings' && (
