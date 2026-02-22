@@ -142,27 +142,43 @@ export const handler: Handler = async (event: HandlerEvent) => {
   console.log(`🏁 Race debug: track.length=${track.length}, track.laps=${track.laps}, totalDistance=${totalDistance}`);
   console.log(`🏁 Race debug: racers[0].baseSpeed=${racers[0]?.baseSpeed}, racers[0].name=${racers[0]?.name}, raceId=${raceId}`);
 
-  // Publish race started with error handling
+  // Helper function to publish with retry
+  const publishWithRetry = async (channel: any, retries = 3): Promise<void> => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await channel.publish('race-update', {
+          type: 'started',
+          raceId,
+          timestamp: startTime,
+          racers: raceRacers,
+          progressMap: raceRacers.reduce((acc: Record<string, number>, r: Racer) => {
+            acc[r.id] = 0;
+            return acc;
+          }, {}),
+        } as RaceUpdate);
+        console.log(`✅ Published race started message for ${raceId}`);
+        return;
+      } catch (publishErr: any) {
+        console.warn(`⚠️ Publish attempt ${attempt} failed:`, publishErr.message);
+        if (attempt === retries) {
+          throw publishErr;
+        }
+        // Exponential backoff: 1s, 2s, 4s
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
+      }
+    }
+  };
+
+  // Publish race started with retry
   try {
-    await channel.publish('race-update', {
-      type: 'started',
-      raceId,
-      timestamp: startTime,
-      racers: raceRacers,
-      progressMap: raceRacers.reduce((acc: Record<string, number>, r: Racer) => {
-        acc[r.id] = 0;
-        return acc;
-      }, {}),
-    } as RaceUpdate);
-    console.log(`✅ Published race started message for ${raceId}`);
+    await publishWithRetry(channel);
   } catch (publishErr) {
-    console.error(`❌ Failed to publish race started message:`, publishErr);
-    // Clean up and return error
+    console.error(`❌ Failed to publish race started after retries:`, publishErr);
     activeRaces.delete(raceId);
     return {
-      statusCode: 500,
+      statusCode: 503,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Failed to start race: " + (publishErr as Error).message }),
+      body: JSON.stringify({ error: "Service temporarily unavailable. Please try again in a moment." }),
     };
   }
 
