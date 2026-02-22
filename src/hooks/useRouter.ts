@@ -106,7 +106,35 @@ export const useRouter = () => {
       setHistory(prev => [...prev, state]);
       setForwardStack([]); // Clear forward stack on new navigation
     }
-    setState(prev => ({ ...prev, ...updates }));
+
+    const newView = updates.view;
+    let clearedState: Partial<RouterState> = {};
+    
+    if (newView && newView !== state.view) {
+      if (newView === 'standings' || newView === 'schedule' || newView === 'race' || newView === 'tracks' || newView === 'seasons') {
+        clearedState = {
+          selectedRacerId: null,
+          selectedHistoricalSeason: null,
+          selectedHistoricalRacerId: null,
+        };
+      } else if (newView === 'profile') {
+        clearedState = {
+          selectedHistoricalSeason: null,
+          selectedHistoricalRacerId: null,
+        };
+      } else if (newView === 'historical-standings') {
+        clearedState = {
+          selectedRacerId: null,
+          selectedHistoricalRacerId: null,
+        };
+      } else if (newView === 'historical-racer-profile') {
+        clearedState = {
+          selectedRacerId: null,
+        };
+      }
+    }
+
+    setState(prev => ({ ...prev, ...clearedState, ...updates }));
   };
 
   const goBack = () => {
