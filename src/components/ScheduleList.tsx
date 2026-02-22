@@ -11,15 +11,16 @@ interface ScheduleListProps {
 }
 
 export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: ScheduleListProps): React.ReactElement => {
+  const [filter, setFilter] = React.useState<'upcoming' | 'all'>('upcoming');
   const now = Date.now();
   
-  const todayRaces = schedule
-    .filter(race => race.startTime >= now - 24 * 60 * 60 * 1000)
-    .sort((a, b) => a.startTime - b.startTime);
+  const displayedRaces = filter === 'upcoming'
+    ? schedule.filter(race => !race.completed && race.startTime >= now - 60 * 60 * 1000)
+    : schedule;
 
-  const upcomingRaces = todayRaces.filter(race => !race.completed && race.startTime >= now);
-  const completedRaces = todayRaces.filter(race => race.completed);
-  const inProgressRaces = todayRaces.filter(race => !race.completed && race.startTime < now);
+  const upcomingRaces = displayedRaces.filter(race => !race.completed && race.startTime >= now);
+  const completedRaces = displayedRaces.filter(race => race.completed);
+  const inProgressRaces = displayedRaces.filter(race => !race.completed && race.startTime < now);
 
   const nextUpRace = upcomingRaces[0] || null;
 
@@ -233,7 +234,7 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
               color: theme.text.primary,
               letterSpacing: -0.5
             }}>
-              Today's Schedule
+              Season Schedule
             </Text>
             <Text style={{ 
               fontSize: 12, 
@@ -241,12 +242,48 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
               marginTop: 4,
               fontWeight: '600'
             }}>
-              {todayRaces.length} race{todayRaces.length !== 1 ? 's' : ''} today
+              {displayedRaces.length} race{displayedRaces.length !== 1 ? 's' : ''} {filter === 'upcoming' ? 'remaining' : 'total'}
             </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity
+              onPress={() => setFilter('upcoming')}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 12,
+                backgroundColor: filter === 'upcoming' ? theme.semantic.success : theme.surface.darkest,
+              }}
+            >
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '700',
+                color: filter === 'upcoming' ? '#000' : theme.text.muted,
+              }}>
+                Upcoming
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setFilter('all')}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 12,
+                backgroundColor: filter === 'all' ? theme.semantic.success : theme.surface.darkest,
+              }}
+            >
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '700',
+                color: filter === 'all' ? '#000' : theme.text.muted,
+              }}>
+                All
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {todayRaces.length === 0 ? (
+        {displayedRaces.length === 0 ? (
           <View style={{ 
             flex: 1, 
             justifyContent: 'center', 
@@ -260,7 +297,7 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
               color: theme.text.primary,
               textAlign: 'center'
             }}>
-              No races scheduled today
+              {filter === 'upcoming' ? 'No upcoming races' : 'No races'}
             </Text>
             <Text style={{ 
               fontSize: 14, 
@@ -268,12 +305,12 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
               textAlign: 'center',
               marginTop: 8
             }}>
-              New races will appear soon
+              {filter === 'upcoming' ? 'All races completed!' : 'No races in this season'}
             </Text>
           </View>
         ) : (
           <FlatList
-            data={todayRaces}
+            data={displayedRaces}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ padding: 16, paddingTop: 0 }}
             renderItem={({ item, index }) => renderRaceItem(item, index, item.completed, item.completed)}

@@ -177,7 +177,7 @@ npm run build
 
 **Tracks:**
 ```bash
-node src/scripts/seed-data.js
+node src/scripts/seed-tracks.js
 ```
 
 **Racers:**
