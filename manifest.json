@@ -1,0 +1,15 @@
+{
+  "name": "DRBY.",
+  "short_name": "DRBY.",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "152x152 180x180 192x192",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#4A895C",
+  "theme_color": "#4A895C"
+}

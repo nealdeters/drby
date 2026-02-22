@@ -134,7 +134,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
       return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
     }
 
-    // Handle standings endpoint - dynamically calculated from race results
+    // Handle standings endpoint - dynamically calculated from race results in schedule
     if (isStandingsRequest) {
       if (method === 'GET') {
          try {
@@ -150,49 +150,35 @@ export const handler: Handler = async (event: HandlerEvent) => {
             console.log('Could not get current season number, defaulting to 1');
           }
           
-          // Get all races to calculate standings dynamically, but only for current season
-          const { blobs } = await store.list();
-          const races = await Promise.all(
-            blobs
-              .filter(b => b.key !== SCHEDULE_KEY && b.key !== STANDINGS_KEY && b.key !== COMPLETED_SEASONS_KEY && b.key !== SEASON_NUMBER_KEY)
-              .map(async (b) => {
-                const data = await store.get(b.key);
-                return JSON.parse(String(data));
-              })
-          );
+          // Get the schedule blob which contains all races
+          const scheduleData = await store.get(SCHEDULE_KEY);
+          const schedule = scheduleData ? JSON.parse(String(scheduleData)) : [];
           
           // Filter races to only include current season races
-          const currentSeasonRaces = races.filter(race => {
-            // Race IDs are formatted as: s{seasonNum}-race-{i}-{timestamp}
-            // For example: s1-race-0-1234567890
+          const currentSeasonRaces = schedule.filter((race: any) => {
             return race.id && race.id.startsWith(`s${currentSeasonNumber}-`);
           });
           
-          console.log(`📊 Found ${currentSeasonRaces.length} races for season ${currentSeasonNumber} out of ${races.length} total races`);
+          console.log(`📊 Found ${currentSeasonRaces.length} races for season ${currentSeasonNumber}`);
           
           // Calculate standings from race results - only for current season
           const standings: Record<string, number> = {};
-          const processedRaces = new Set<string>(); // Track processed race IDs to avoid duplicates
+          const processedRaces = new Set<string>();
           
-          currentSeasonRaces.forEach(race => {
-            // Skip if this race ID has already been processed (prevent duplicate counting)
+          currentSeasonRaces.forEach((race: any) => {
             if (!race.id || processedRaces.has(race.id)) {
-              console.log('⚠️ Skipping duplicate or invalid race:', race.id);
               return;
             }
             
             processedRaces.add(race.id);
             
             if (race.results && Array.isArray(race.results)) {
-              // 1st place: 5 points
               if (race.results[0]) {
                 standings[race.results[0]] = (standings[race.results[0]] || 0) + 5;
               }
-              // 2nd place: 3 points
               if (race.results[1]) {
                 standings[race.results[1]] = (standings[race.results[1]] || 0) + 3;
               }
-              // 3rd place: 1 point
               if (race.results[2]) {
                 standings[race.results[2]] = (standings[race.results[2]] || 0) + 1;
               }
