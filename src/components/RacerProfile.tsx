@@ -264,6 +264,165 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
       </View>
     </View>
 
+    {/* New Attributes Card */}
+    <View style={{ 
+      backgroundColor: theme.surface.card, 
+      padding: 20, 
+      marginBottom: 16, 
+      borderRadius: 24,
+    }}>
+      <Text style={{ 
+        color: theme.text.muted, 
+        fontSize: 10, 
+        fontWeight: 'bold', 
+        textTransform: 'uppercase', 
+        marginBottom: 16, 
+        letterSpacing: 1,
+      }}>Attributes</Text>
+      
+      {/* Row 1: Acceleration & Endurance */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+        <View style={{ 
+          width: '48%', 
+          backgroundColor: theme.surface.elevated, 
+          padding: 16, 
+          borderRadius: 16,
+        }}>
+          <Text style={{ 
+            color: theme.text.muted, 
+            fontSize: 10, 
+            fontWeight: 'bold', 
+            textTransform: 'uppercase', 
+            marginBottom: 4, 
+            letterSpacing: 1,
+          }}>Acceleration</Text>
+          <Text style={{ 
+            color: theme.text.primary, 
+            fontWeight: 'bold', 
+            fontSize: 20,
+            marginBottom: 8,
+          }}>{(stats.acceleration || 50)}</Text>
+          <View style={{ 
+            height: 6, 
+            backgroundColor: theme.surface.dark, 
+            borderRadius: 999, 
+            overflow: 'hidden',
+          }}>
+            <View style={{ 
+              height: '100%', 
+              backgroundColor: '#F59E0B', 
+              width: `${stats.acceleration || 50}%`,
+            }} />
+          </View>
+        </View>
+        
+        <View style={{ 
+          width: '48%', 
+          backgroundColor: theme.surface.elevated, 
+          padding: 16, 
+          borderRadius: 16,
+        }}>
+          <Text style={{ 
+            color: theme.text.muted, 
+            fontSize: 10, 
+            fontWeight: 'bold', 
+            textTransform: 'uppercase', 
+            marginBottom: 4, 
+            letterSpacing: 1,
+          }}>Endurance</Text>
+          <Text style={{ 
+            color: theme.text.primary, 
+            fontWeight: 'bold', 
+            fontSize: 20,
+            marginBottom: 8,
+          }}>{(stats.endurance || 50)}</Text>
+          <View style={{ 
+            height: 6, 
+            backgroundColor: theme.surface.dark, 
+            borderRadius: 999, 
+            overflow: 'hidden',
+          }}>
+            <View style={{ 
+              height: '100%', 
+              backgroundColor: '#22C55E', 
+              width: `${stats.endurance || 50}%`,
+            }} />
+          </View>
+        </View>
+      </View>
+      
+      {/* Row 2: Consistency & Stamina Recovery */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <View style={{ 
+          width: '48%', 
+          backgroundColor: theme.surface.elevated, 
+          padding: 16, 
+          borderRadius: 16,
+        }}>
+          <Text style={{ 
+            color: theme.text.muted, 
+            fontSize: 10, 
+            fontWeight: 'bold', 
+            textTransform: 'uppercase', 
+            marginBottom: 4, 
+            letterSpacing: 1,
+          }}>Consistency</Text>
+          <Text style={{ 
+            color: theme.text.primary, 
+            fontWeight: 'bold', 
+            fontSize: 20,
+            marginBottom: 8,
+          }}>{(stats.consistency || 50)}</Text>
+          <View style={{ 
+            height: 6, 
+            backgroundColor: theme.surface.dark, 
+            borderRadius: 999, 
+            overflow: 'hidden',
+          }}>
+            <View style={{ 
+              height: '100%', 
+              backgroundColor: '#3B82F6', 
+              width: `${stats.consistency || 50}%`,
+            }} />
+          </View>
+        </View>
+        
+        <View style={{ 
+          width: '48%', 
+          backgroundColor: theme.surface.elevated, 
+          padding: 16, 
+          borderRadius: 16,
+        }}>
+          <Text style={{ 
+            color: theme.text.muted, 
+            fontSize: 10, 
+            fontWeight: 'bold', 
+            textTransform: 'uppercase', 
+            marginBottom: 4, 
+            letterSpacing: 1,
+          }}>Stamina Recovery</Text>
+          <Text style={{ 
+            color: theme.text.primary, 
+            fontWeight: 'bold', 
+            fontSize: 20,
+            marginBottom: 8,
+          }}>{(stats.staminaRecovery || 50)}</Text>
+          <View style={{ 
+            height: 6, 
+            backgroundColor: theme.surface.dark, 
+            borderRadius: 999, 
+            overflow: 'hidden',
+          }}>
+            <View style={{ 
+              height: '100%', 
+              backgroundColor: '#8B5CF6', 
+              width: `${stats.staminaRecovery || 50}%`,
+            }} />
+          </View>
+        </View>
+      </View>
+    </View>
+
     {/* Career Performance Card */}
     <View style={{ 
       backgroundColor: theme.surface.card, 

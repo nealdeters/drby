@@ -6,10 +6,16 @@ export interface Racer {
   id: string;
   name: string;
   color: string;
-  baseSpeed: number; // 1-100 (roughly m/s)
+  baseSpeed: number; // 70-90 (roughly m/s)
   health: number; // 0-100
   strategy: Strategy;
   trackPreference: Surface;
+  
+  // New attributes (0-100)
+  acceleration: number; // Higher = faster burst at start
+  endurance: number; // Higher = slower health decay
+  consistency: number; // Higher = less speed variance
+  staminaRecovery: number; // Higher = more health recovered between races
   
   // Race State
   lane: number;

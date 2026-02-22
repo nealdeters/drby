@@ -16,6 +16,11 @@ interface Racer {
   finishTime?: number;
   position?: number; // Current race position (1-based)
   trackPreference: 'asphalt' | 'dirt' | 'grass';
+  // New attributes
+  acceleration: number;
+  endurance: number;
+  consistency: number;
+  staminaRecovery: number;
 }
 
 interface RaceUpdate {
@@ -151,22 +156,33 @@ export const handler: Handler = async (event: HandlerEvent) => {
     for (const racer of raceRacers) {
       if (racer.status !== 'active') continue;
 
-      // Health decay during race based on strategy (per tick, ~30 ticks/sec)
-      // Aggressive: loses health fastest - starts fast but tires quickly
-      // Balanced: moderate decay - steady throughout
-      // Conservative: slowest decay - maintains energy
-      const healthDecayRates = {
+      // Calculate race progress percentage (0-1)
+      const raceProgress = racer.totalDistance / totalDistance;
+      
+      // Health decay during race based on strategy AND endurance attribute
+      // Higher endurance = slower health decay
+      const strategyBaseDecay = {
         aggressive: 0.025,    // ~0.75 health per second (fastest burn)
         balanced: 0.012,      // ~0.36 health per second (moderate)
         conservative: 0.006  // ~0.18 health per second (slowest burn)
       };
-      const decayRate = healthDecayRates[racer.strategy] || healthDecayRates.balanced;
+      const baseDecayRate = strategyBaseDecay[racer.strategy] || strategyBaseDecay.balanced;
+      // Endurance reduces decay: (100 - endurance) / 100 gives multiplier (e.g., 80 endurance = 0.2 * decay)
+      const enduranceMultiplier = Math.max(0.2, (100 - racer.endurance) / 100);
+      const decayRate = baseDecayRate * enduranceMultiplier;
       racer.health = Math.max(0, (racer.health || 100) - decayRate);
       const currentHealth = racer.health;
 
-      // Base speed variance - unique per racer but bounded
-      const speedVariance = 0.92 + ((racer.id.charCodeAt(0) % 20) / 100); // 92% to 112% variation
+      // Base speed calculation
       const baseSpeed = racer.baseSpeed * (updateInterval / 1000);
+      
+      // Acceleration boost: stronger in first 10% of race, then fades
+      // Higher acceleration = bigger initial boost
+      let accelerationBoost = 0;
+      if (raceProgress < 0.1) {
+        const accelerationFactor = racer.acceleration / 100; // 0-1
+        accelerationBoost = 0.3 * accelerationFactor * (1 - raceProgress * 10); // Fades from 30% to 0%
+      }
       
       // Track preference penalties/bonuses
       let trackPenalty = 0;
@@ -181,25 +197,27 @@ export const handler: Handler = async (event: HandlerEvent) => {
       // Fatigue penalty increases as health decreases
       const fatiguePenalty = Math.max(0, (100 - currentHealth) / 200);
       
-      // Speed variance - small random fluctuation that can go up OR down
-      // Aggressive gets more variance early but less as health drops
-      // Conservative gets steadier variance throughout
-      const strategyVariance = {
+      // Speed variance - based on strategy AND consistency attribute
+      // Higher consistency = less variance
+      const strategyBaseVariance = {
         aggressive: 0.15,   // High variance - big speed swings
         balanced: 0.08,    // Moderate variance
         conservative: 0.04 // Low variance - steadier pace
       };
-      const varianceCap = strategyVariance[racer.strategy] || strategyVariance.balanced;
+      const baseVariance = strategyBaseVariance[racer.strategy] || strategyBaseVariance.balanced;
+      // Consistency reduces variance: (100 - consistency) / 100 gives multiplier
+      const consistencyMultiplier = Math.max(0.3, (100 - racer.consistency) / 100);
+      const varianceCap = baseVariance * consistencyMultiplier;
       
       // Random speed adjustment - can be positive OR negative, bounded
       const speedAdjustment = (Math.random() - 0.5) * 2 * varianceCap; // -varianceCap to +varianceCap
       
-      // Final speed with bounded variance + fatigue penalty
-      const finalSpeed = baseSpeed * speedVariance * (1 + speedAdjustment - fatiguePenalty - trackPenalty);
+      // Final speed with all factors
+      const finalSpeed = baseSpeed * (1 + accelerationBoost + speedAdjustment - fatiguePenalty - trackPenalty);
       
       // Debug: log first tick speed
       if (elapsed < 500 && raceRacers.indexOf(racer) === 0) {
-        console.log(`🏃 ${racer.name}: baseSpeed=${baseSpeed.toFixed(2)}, variance=${speedVariance.toFixed(2)}, adjust=${speedAdjustment.toFixed(2)}, fatigue=${fatiguePenalty.toFixed(2)}, final=${finalSpeed.toFixed(2)}`);
+        console.log(`🏃 ${racer.name}: baseSpeed=${baseSpeed.toFixed(2)}, accelBoost=${accelerationBoost.toFixed(2)}, variance=${varianceCap.toFixed(2)}, adjust=${speedAdjustment.toFixed(2)}, fatigue=${fatiguePenalty.toFixed(2)}, final=${finalSpeed.toFixed(2)}`);
       }
       
       const previousLaps = racer.laps;
@@ -229,8 +247,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
       
       // Calculate progress as a percentage of total race distance (0-1)
       // This ensures racers complete all laps before finishing
-      const raceProgress = Math.min(1, racer.totalDistance / totalDistance);
-      progressMap[racer.id] = raceProgress;
+      const raceProgressPct = Math.min(1, racer.totalDistance / totalDistance);
+      progressMap[racer.id] = raceProgressPct;
       
       // Also track lap-specific progress for visual representation
       const lapProgress = currentLapDistance / track.length;

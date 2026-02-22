@@ -15,6 +15,10 @@ export interface RacerSeasonStats {
   health: number;
   strategy: string;
   trackPreference: string;
+  acceleration: number;
+  endurance: number;
+  consistency: number;
+  staminaRecovery: number;
   points: number;
   first: number;
   second: number;
@@ -229,6 +233,10 @@ export const useSeason = () => {
                 health: racer.health,
                 strategy: racer.strategy,
                 trackPreference: racer.trackPreference,
+                acceleration: racer.acceleration || 50,
+                endurance: racer.endurance || 50,
+                consistency: racer.consistency || 50,
+                staminaRecovery: racer.staminaRecovery || 50,
                 points: savedStandings[racer.id] || 0,
                 first: stats?.first || 0,
                 second: stats?.second || 0,
@@ -316,6 +324,10 @@ export const useSeason = () => {
               health: racer.health,
               strategy: racer.strategy,
               trackPreference: racer.trackPreference,
+              acceleration: racer.acceleration || 50,
+              endurance: racer.endurance || 50,
+              consistency: racer.consistency || 50,
+              staminaRecovery: racer.staminaRecovery || 50,
               points: standings[racer.id] || 0,
               first: stats?.first || 0,
               second: stats?.second || 0,
@@ -459,8 +471,11 @@ export const useSeason = () => {
         if (raceResult.status === 'injured') newHealth -= 25;
         return { ...r, health: Math.max(0, newHealth) };
       } else {
-        // Recover health if they rested - moderate recovery
-        return { ...r, health: Math.min(100, r.health + 8) };
+        // Recover health if they rested - based on staminaRecovery attribute
+        // staminaRecovery 0-100 maps to 3-15 health recovered
+        const recoveryRate = 3 + (r.staminaRecovery || 50) / 100 * 12;
+        const healthRecovered = recoveryRate + Math.random() * 3;
+        return { ...r, health: Math.min(100, r.health + healthRecovered) };
       }
     }));
   }, []);

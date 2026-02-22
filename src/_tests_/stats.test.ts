@@ -4,6 +4,7 @@ import { Racer, RaceEvent, Track } from '../gameTypes';
 describe('stats', () => {
   const mockRacer: Racer = {
     id: '1', name: 'R1', color: 'red', baseSpeed: 10, health: 100, strategy: 'balanced', trackPreference: 'asphalt',
+    acceleration: 50, endurance: 50, consistency: 50, staminaRecovery: 50,
     lane: 0, progress: 0, laps: 0, totalDistance: 0, status: 'active', currentSpeed: 0, finishTime: 0
   };
   const mockTrack: Track = { id: 't1', name: 'T1', surface: 'asphalt', length: 1000, laps: 1 };

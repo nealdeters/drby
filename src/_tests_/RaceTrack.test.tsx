@@ -8,7 +8,9 @@ describe('RaceTrack', () => {
   // Create 12 mock racers
   const mockRacers = Array.from({ length: 12 }, (_, i) => ({
     id: `${i}`, name: `R${i}`, color: 'red', baseSpeed: 10, progress: 0, totalDistance: 0, laps: 0, status: 'active' as const, currentSpeed: 10,
-    health: 100, strategy: 'balanced' as const, trackPreference: 'asphalt' as const, lane: i
+    health: 100, strategy: 'balanced' as const, trackPreference: 'asphalt' as const, 
+    acceleration: 50, endurance: 50, consistency: 50, staminaRecovery: 50,
+    lane: i
   }));
   
   const mockProgressMap: any = {};
