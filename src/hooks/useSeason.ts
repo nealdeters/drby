@@ -190,22 +190,47 @@ export const useSeason = () => {
     }
   }, [roster, initialRosterLoaded]);
 
-  const generateSchedule = async (currentRoster: Racer[], currentTracks: Track[], seasonNum: number = currentSeasonNumber) => {
+  const generateSchedule = async (currentRacer: Racer[], currentTracks: Track[], seasonNum: number = currentSeasonNumber) => {
     const newSchedule: RaceEvent[] = [];
     const now = Date.now();
     const seasonPrefix = `s${seasonNum}`;
     
+    // Find the next 10-minute boundary (0, 10, 20, 30, 40, or 50 minutes)
+    const date = new Date(now);
+    const currentMinutes = date.getMinutes();
+    const currentSeconds = date.getSeconds();
+    const currentMillis = date.getMilliseconds();
+    
+    // Calculate next 10-minute boundary
+    let nextMinute = Math.ceil(currentMinutes / 10) * 10;
+    let nextHour = date.getHours();
+    
+    if (nextMinute >= 60) {
+      nextMinute = 0;
+      nextHour = (nextHour + 1) % 24;
+    }
+    
+    // Set start time to next 10-minute boundary
+    const startTime = new Date(date);
+    startTime.setHours(nextHour, nextMinute, 0, 0);
+    let baseTime = startTime.getTime();
+    
+    // If the calculated time is in the past (shouldn't happen, but safety check), add 10 minutes
+    if (baseTime <= now) {
+      baseTime = now + (10 * 60 * 1000);
+    }
+    
     // 1-Week Season: 1008 races, 10 minutes apart (6 races per hour)
-    // Schedule: Continuous 7-day cycle starting 1 hour from now
+    // Schedule: Continuous 7-day cycle starting at next 10-minute boundary
     for (let i = 0; i < 1008; i++) {
       // Pick 4-6 random racers for better competition
       const numRacers = 4 + Math.floor(Math.random() * 3); // 4-6 racers
-      const shuffled = [...currentRoster].sort(() => 0.5 - Math.random());
+      const shuffled = [...currentRacer].sort(() => 0.5 - Math.random());
       const selectedIds = shuffled.slice(0, numRacers).map(r => r.id);
 
       newSchedule.push({
         id: `${seasonPrefix}-race-${i}-${now}`,
-        startTime: now + (i * 10 * 60 * 1000) + (10 * 60 * 1000), // First race in 10 mins, then 10min intervals
+        startTime: baseTime + (i * 10 * 60 * 1000), // 10-minute intervals from boundary
         seed: Math.floor(Math.random() * 1000000),
         track: currentTracks[i % currentTracks.length],
         racerIds: selectedIds,

@@ -1,6 +1,6 @@
 export type Surface = 'asphalt' | 'dirt' | 'grass';
 export type Strategy = 'aggressive' | 'conservative' | 'balanced';
-export type RacerStatus = 'active' | 'finished' | 'injured' | 'waiting';
+export type RacerStatus = 'active' | 'finished' | 'injured' | 'waiting' | 'dnf';
 
 export interface Racer {
   id: string;

@@ -18,6 +18,9 @@
 [functions]
   directory = "netlify/functions"
 
+[functions.scheduled-race-trigger]
+  schedule = "* * * * *"
+
 [[redirects]]
   from = "/api/races"
   to = "/.netlify/functions/races"

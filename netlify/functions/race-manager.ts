@@ -12,7 +12,7 @@ interface Racer {
   progress: number;
   laps: number;
   totalDistance: number;
-  status: 'active' | 'finished' | 'injured' | 'waiting';
+  status: 'active' | 'finished' | 'injured' | 'waiting' | 'dnf';
   finishTime?: number;
   position?: number;
   trackPreference: 'asphalt' | 'dirt' | 'grass';
@@ -29,12 +29,14 @@ interface RaceUpdate {
   racers?: Racer[];
   results?: Racer[];
   progressMap?: Record<string, number>;
+  dnfRacers?: Racer[];
 }
 
 interface RaceState {
   raceId: string;
   track: any;
   racers: Racer[];
+  dnfRacers: Racer[];
   totalDistance: number;
   startTime: number;
   tickCount: number;
@@ -42,6 +44,32 @@ interface RaceState {
 }
 
 const getRaceStateKey = (raceId: string) => `race-state-${raceId}`;
+const getRaceLockKey = (raceId: string) => `race-lock-${raceId}`;
+const LOCK_TTL_SECONDS = 30; // Lock expires after 30 seconds
+
+async function acquireLock(store: any, raceId: string): Promise<boolean> {
+  const lockKey = getRaceLockKey(raceId);
+  try {
+    // Try to set the lock with TTL - succeeds only if key doesn't exist
+    await store.set(lockKey, JSON.stringify({ 
+      lockedAt: Date.now(),
+      raceId 
+    }), { expiration: LOCK_TTL_SECONDS });
+    return true;
+  } catch (err) {
+    // Key already exists - lock not acquired
+    return false;
+  }
+}
+
+async function releaseLock(store: any, raceId: string): Promise<void> {
+  const lockKey = getRaceLockKey(raceId);
+  try {
+    await store.delete(lockKey);
+  } catch (err) {
+    console.warn('Failed to release lock:', err);
+  }
+}
 
 async function loadRaceState(store: any, raceId: string): Promise<RaceState | null> {
   const data = await store.get(getRaceStateKey(raceId));
@@ -207,22 +235,33 @@ async function continueRace(
   if (state.isFinished) {
     console.log(`🏁 Race ${raceId} finished!`);
 
-    const results = [...state.racers].sort((a, b) =>
+    // Sort active racers by finish time, then append DNF racers at the end
+    const finishedRacers = [...state.racers].sort((a, b) =>
       (a.finishTime || Infinity) - (b.finishTime || Infinity)
     );
+    
+    // DNF racers go at the end with positions after all finishers
+    const dnfWithPositions = state.dnfRacers.map((r, i) => ({
+      ...r,
+      position: finishedRacers.length + i + 1,
+    }));
+    
+    const results = [...finishedRacers, ...dnfWithPositions];
 
     await publishRaceUpdate(channel, {
       type: 'finished',
       raceId,
       timestamp: Date.now(),
       results,
+      dnfRacers: state.dnfRacers,
     });
 
     await store.set(raceId, JSON.stringify({
       id: raceId,
       track: state.track,
       results: results.map(r => r.id),
-      finishTimes: results.reduce((acc, r) => {
+      dnfRacers: state.dnfRacers.map(r => r.id),
+      finishTimes: finishedRacers.reduce((acc, r) => {
         if (r.finishTime) acc[r.id] = r.finishTime;
         return acc;
       }, {} as Record<string, number>),
@@ -237,25 +276,45 @@ async function continueRace(
   // Race not finished - trigger continuation
   console.log(`🔄 Race ${raceId} continuing, elapsed: ${elapsed}ms, ticks: ${state.tickCount}`);
 
-  const functionUrl = process.env.URL
-    ? `https://${process.env.URL}/.netlify/functions/race-manager`
-    : 'http://localhost:9999/.netlify/functions/race-manager';
+  // Publish to Ably for coordinator (backup) - but ALSO trigger HTTP for reliability
+  const controlChannel = ably.channels.get(`race:${raceId}:control`);
 
   try {
-    await fetch(functionUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.API_KEY || ''
-      },
-      body: JSON.stringify({
-        raceId,
-        continue: true
-      })
+    await controlChannel.publish('continuation', {
+      raceId,
+      timestamp: Date.now(),
     });
-    console.log(`📡 Triggered continuation for race ${raceId}`);
+    console.log(`📡 Published continuation message for race ${raceId}`);
   } catch (err) {
-    console.error('Failed to trigger continuation:', err);
+    console.error('Failed to publish continuation:', err);
+  }
+
+  // Trigger continuation via HTTP (reliable server-side continuation)
+  // Note: In local dev, we rely on the coordinator to trigger continuation via Ably
+  // since the function URL may not be accessible from within itself
+  const functionUrl = process.env.URL
+    ? `https://${process.env.URL}/.netlify/functions/race-manager`
+    : null;
+
+  if (functionUrl) {
+    try {
+      await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.API_KEY || ''
+        },
+        body: JSON.stringify({
+          raceId,
+          continue: true
+        })
+      });
+      console.log(`📡 HTTP triggered continuation for race ${raceId}`);
+    } catch (err) {
+      console.error('Failed to HTTP trigger continuation:', err);
+    }
+  } else {
+    console.log(`📡 Skipping HTTP trigger in local dev, relying on coordinator for continuation`);
   }
 
   return { shouldContinue: false, message: 'Race continuing' };
@@ -282,12 +341,80 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   const store = getStore('races', { siteID: siteId, token });
 
+  // Handle DELETE to stop/kill a race
+  if (event.httpMethod === 'DELETE') {
+    const params = event.queryStringParameters || {};
+    const raceIdToDelete = params.raceId;
+
+    if (!raceIdToDelete) {
+      return { statusCode: 400, body: JSON.stringify({ error: "Missing required parameter: raceId" }) };
+    }
+
+    try {
+      // Try to load existing state - if it doesn't exist, just release lock and clean up
+      const existingState = await loadRaceState(store, raceIdToDelete);
+      if (existingState) {
+        existingState.isFinished = true;
+        await saveRaceState(store, existingState);
+        console.log(`🛑 Race ${raceIdToDelete} marked as stopped`);
+      } else {
+        console.log(`🛑 No race state found for ${raceIdToDelete}, proceeding with cleanup`);
+      }
+      
+      await releaseLock(store, raceIdToDelete);
+      console.log(`🛑 Race ${raceIdToDelete} stopped and cleaned up`);
+
+      // Publish stop message to Ably (fire and forget, don't fail if it errors)
+      try {
+        const ably = new Ably.Rest(ablyApiKey);
+        const channel = ably.channels.get(`race:${raceIdToDelete}`);
+        await channel.publish('race-stopped', { raceId: raceIdToDelete, timestamp: Date.now() });
+      } catch (ablyErr) {
+        console.warn('⚠️ Failed to publish race-stopped to Ably:', ablyErr);
+      }
+
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "Race stopped", raceId: raceIdToDelete }),
+      };
+    } catch (err) {
+      console.error('Failed to stop race:', err);
+      return { statusCode: 500, body: JSON.stringify({ error: "Failed to stop race" }) };
+    }
+  }
+
   if (event.httpMethod === 'GET') {
     const params = event.queryStringParameters || {};
     const action = params.action;
 
     if (action === 'status') {
-      // Check for active race states in blob store
+      const specificRaceId = params.raceId;
+      
+      // If specific raceId provided, check that race only
+      if (specificRaceId) {
+        const state = await loadRaceState(store, specificRaceId);
+        if (state) {
+          return {
+            statusCode: 200,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+              exists: true,
+              raceId: state.raceId, 
+              tickCount: state.tickCount, 
+              isFinished: state.isFinished,
+              startTime: state.startTime,
+            }),
+          };
+        }
+        return {
+          statusCode: 200,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ exists: false, raceId: specificRaceId }),
+        };
+      }
+      
+      // Check for all active race states in blob store
       const keys = await store.list();
       const raceStates = [];
       for (const key of keys.blobs) {
@@ -326,12 +453,30 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   // Check if this is a continuation request
   if (isContinuation) {
+    // Try to acquire lock - only one invocation should run at a time
+    const lockAcquired = await acquireLock(store, raceId);
+    if (!lockAcquired) {
+      console.log(`🔒 Race ${raceId} is locked, another invocation is running`);
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "Race locked, another instance is running", raceId }),
+      };
+    }
+
     const existingState = await loadRaceState(store, raceId);
     if (!existingState) {
+      await releaseLock(store, raceId);
       return { statusCode: 404, body: JSON.stringify({ error: "Race state not found" }) };
     }
 
     const result = await continueRace(ablyApiKey, existingState, store, siteId, token, true);
+    
+    // Release lock after race finishes or times out
+    if (!result.shouldContinue) {
+      await releaseLock(store, raceId);
+    }
+    
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
@@ -344,9 +489,21 @@ export const handler: Handler = async (event: HandlerEvent) => {
     return { statusCode: 400, body: JSON.stringify({ error: "Missing required fields: racers, track" }) };
   }
 
+  // Try to acquire lock before starting new race
+  const lockAcquired = await acquireLock(store, raceId);
+  if (!lockAcquired) {
+    console.log(`🔒 Race ${raceId} is locked, another invocation is running`);
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Race already in progress (locked)", raceId, channel: `race:${raceId}` }),
+    };
+  }
+
   // Check if race already exists in state
   const existingState = await loadRaceState(store, raceId);
   if (existingState) {
+    await releaseLock(store, raceId);
     console.log(`Race ${raceId} already exists, returning current state`);
     return {
       statusCode: 200,
@@ -358,8 +515,39 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const ably = new Ably.Rest(ablyApiKey);
   const channel = ably.channels.get(`race:${raceId}`);
 
+  // Filter racers: those with health <= 60 sit out as DNF
+  const activeRacers: Racer[] = [];
+  const dnfRacers: Racer[] = [];
+  
+  racers.forEach((r: any, index: number) => {
+    const racerHealth = r.health || 100;
+    if (racerHealth <= 60) {
+      // Racer sits out due to low health - mark as DNF
+      dnfRacers.push({
+        ...r,
+        strategy: r.strategy || 'balanced',
+        health: racerHealth,
+        progress: 0,
+        laps: 0,
+        totalDistance: 0,
+        status: 'dnf' as const,
+        lane: Math.min(index + 1, 8),
+        position: 0,
+        acceleration: r.acceleration ?? 50,
+        endurance: r.endurance ?? 50,
+        consistency: r.consistency ?? 50,
+        staminaRecovery: r.staminaRecovery ?? 50,
+        finishTime: undefined,
+      });
+    } else {
+      activeRacers.push(r);
+    }
+  });
+
+  console.log(`🏥 Race ${raceId}: ${dnfRacers.length} racers DNF (health <= 60), ${activeRacers.length} racing`);
+
   // Initialize race state
-  const raceRacers: Racer[] = racers.map((r: any, index: number) => ({
+  const raceRacers: Racer[] = activeRacers.map((r: any, index: number) => ({
     ...r,
     strategy: r.strategy || 'balanced',
     health: r.health || 100,
@@ -382,6 +570,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
     raceId,
     track,
     racers: raceRacers,
+    dnfRacers: dnfRacers,
     totalDistance,
     startTime,
     tickCount: 0,
@@ -404,6 +593,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   // Start the race continuation loop
   const result = await continueRace(ablyApiKey, raceState, store, siteId, token, false);
+
+  // Release lock after race finishes
+  await releaseLock(store, raceId);
 
   const responseHeaders: Record<string, string | number> = {
     "Content-Type": "application/json",

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { View, FlatList, Text, SafeAreaView, TouchableOpacity, StatusBar, Dimensions, ScrollView, PanResponder } from 'react-native';
 import { RaceTrack } from './components/RaceTrack';
 import { useRace } from './hooks/useRace';
+import { useRaceCoordinator } from './hooks/useRaceCoordinator';
 import { useSeason, CompletedSeason } from './hooks/useSeason';
 import { Racer, Track, RaceEvent } from './gameTypes';
 import { useRouter, ViewState } from './hooks/useRouter';
@@ -98,6 +99,9 @@ export default function App() {
     setRaceResults(results);
     setShowResultsDrawer(true);
     
+    // Clear the last triggered race ID so new races can be triggered
+    localStorage.removeItem('drby-last-race-id');
+    
     // Skip completing test races - they don't affect standings or schedule
     if (activeRaceId.startsWith('test-')) {
       console.log('🧪 Test race finished, skipping completion');
@@ -117,12 +121,20 @@ export default function App() {
   const displayIsActive = !!(activeRaceId || (nextRace && !nextRace.completed));
 
   // Real-time race hook - subscribes to Ably channel
-  const { racers, isRacing, progressMap } = useRace({
+  const { racers, isRacing, raceStartTime, progressMap } = useRace({
     racers: currentRaceRacers,
     track: displayTrack,
     raceId: displayRaceId,
     isActive: displayIsActive,
     onRaceFinish: handleRaceFinish
+  });
+
+  // Coordinator hook - handles race triggering via Ably presence
+  const { isCoordinator, isConnected } = useRaceCoordinator({
+    raceId: displayRaceId,
+    racers: currentRaceRacers,
+    track: displayTrack,
+    isActive: displayIsActive,
   });
 
   // Detect injuries during race and show toast
@@ -195,10 +207,16 @@ export default function App() {
     let interval: NodeJS.Timeout | null = null;
     
     if (isRacing) {
-      const startTime = Date.now() - raceElapsedTime;
-      interval = setInterval(() => {
-        setRaceElapsedTime(Date.now() - startTime);
-      }, 100);
+      if (raceStartTime) {
+        interval = setInterval(() => {
+          setRaceElapsedTime(Date.now() - raceStartTime);
+        }, 100);
+      } else {
+        const startTime = Date.now() - raceElapsedTime;
+        interval = setInterval(() => {
+          setRaceElapsedTime(Date.now() - startTime);
+        }, 100);
+      }
     } else {
       setRaceElapsedTime(0);
     }
@@ -206,7 +224,7 @@ export default function App() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isRacing]);
+  }, [isRacing, raceStartTime]);
 
   // Reset trigger flag when race state changes
   useEffect(() => {
@@ -332,6 +350,37 @@ export default function App() {
       setTestRaceRacers([]);
     }
   }, [roster, tracks, API_URL, headers]);
+
+  // Debug: Kill the current race and clear state
+  const killRace = useCallback(async () => {
+    console.log('🛑 Killing active race');
+    
+    const raceIdToKill = activeRaceId || nextRace?.id;
+    
+    // Call API to stop race (deletes from blob store)
+    if (raceIdToKill) {
+      try {
+        await fetch(`${API_URL}/race-manager?raceId=${raceIdToKill}`, {
+          method: 'DELETE',
+          headers,
+        });
+        console.log('🛑 Race stopped on server');
+      } catch (err) {
+        console.error('Failed to stop race on server:', err);
+      }
+    }
+    
+    setActiveRaceId('');
+    setTestRaceRacers([]);
+    setTestRaceTrack(null);
+    raceStartTriggered.current = false;
+    if (raceStartTimeout.current) {
+      clearTimeout(raceStartTimeout.current);
+      raceStartTimeout.current = null;
+    }
+    // Clear the last triggered race ID so coordinator doesn't try to re-trigger
+    localStorage.removeItem('drby-last-race-id');
+  }, [activeRaceId, nextRace, API_URL, headers]);
   
   useEffect(() => {
     // Clear any existing interval first
@@ -370,16 +419,44 @@ export default function App() {
       
       // Only trigger race start if not already triggered and not racing
       if (!raceStartTriggered.current && !isRacing) {
-        raceStartTriggered.current = true;
-        // Set safety timeout to reset flag if race doesn't start
-        raceStartTimeout.current = setTimeout(resetRaceTrigger, 30000);
-        console.log('🚀 Triggering overdue race:', upcomingRace.id, 'with racers:', currentRaceRacers.map(r => r.id));
-        if (currentRaceRacers.length === 0) {
-          console.error('❌ Cannot start race - no valid racers found');
-          resetRaceTrigger();
-          return;
-        }
-        triggerRaceWithRetry(upcomingRace, currentRaceRacers);
+        // Check if race already exists (finished or in progress) before triggering
+        const checkAndTrigger = async () => {
+          try {
+            const statusResponse = await fetch(`${API_URL}/race-manager?action=status&raceId=${upcomingRace.id}`, {
+              method: 'GET',
+              headers
+            });
+            if (statusResponse.ok) {
+              const statusResult = await statusResponse.json();
+              if (statusResult.exists) {
+                if (statusResult.isFinished) {
+                  console.log('⏭️ Race already finished, marking complete:', upcomingRace.id);
+                  skipOverdueRace(upcomingRace.id);
+                  return;
+                } else {
+                  console.log('⏭️ Race already in progress, skipping trigger');
+                  raceStartTriggered.current = true;
+                  return;
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('⚠️ Could not check race status:', err);
+          }
+          
+          raceStartTriggered.current = true;
+          // Set safety timeout to reset flag if race doesn't start
+          raceStartTimeout.current = setTimeout(resetRaceTrigger, 30000);
+          console.log('🚀 Triggering overdue race:', upcomingRace.id, 'with racers:', currentRaceRacers.map(r => r.id));
+          if (currentRaceRacers.length === 0) {
+            console.error('❌ Cannot start race - no valid racers found');
+            resetRaceTrigger();
+            return;
+          }
+          triggerRaceWithRetry(upcomingRace, currentRaceRacers);
+        };
+        
+        checkAndTrigger();
       }
       return;
     }
@@ -402,17 +479,22 @@ export default function App() {
         
         // Check if race was already triggered by server-side scheduled function
         try {
-          const checkResponse = await fetch(`${API_URL}/race-manager?action=status`, {
+          const checkResponse = await fetch(`${API_URL}/race-manager?action=status&raceId=${upcomingRace.id}`, {
             method: 'GET',
             headers
           });
           if (checkResponse.ok) {
             const checkResult = await checkResponse.json();
-            const raceExists = checkResult.activeRaces?.includes(upcomingRace.id);
-            if (raceExists) {
-              console.log('⏭️ Race already triggered by server, skipping client trigger');
-              clearCountdownInterval();
-              return;
+            if (checkResult.exists) {
+              if (checkResult.isFinished) {
+                console.log('⏭️ Race already finished, skipping trigger');
+                clearCountdownInterval();
+                return;
+              } else {
+                console.log('⏭️ Race already in progress, skipping trigger');
+                clearCountdownInterval();
+                return;
+              }
             }
           }
         } catch (err) {
@@ -543,6 +625,14 @@ export default function App() {
                   <Text style={{ color: '#000', fontWeight: 'bold' }}>🧪 Start Test Race</Text>
                 </TouchableOpacity>
               )}
+              {DEBUG_SHOW_TEST_RACE && (activeRaceId || isRacing) && (
+                <TouchableOpacity
+                  onPress={killRace}
+                  style={{ marginTop: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: theme.semantic.error, borderRadius: 8 }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>🛑 Kill Race</Text>
+                </TouchableOpacity>
+              )}
             {/* {isRacing && (
                <Text className="text-2xl font-black mt-2 tracking-tight" style={{ color: theme.text.muted, fontSize: 24, fontWeight: '900', marginTop: 8, letterSpacing: -1 }}>
                 Racing!
@@ -570,7 +660,7 @@ export default function App() {
           )}
 
           <View className="h-[300px] w-full" style={{ height: 300, width: '100%' }}>
-            <RaceTrack racers={racers} track={nextRace?.track || LOADING_TRACK} progressMap={progressMap} />
+            <RaceTrack racers={racers} track={displayTrack} progressMap={progressMap} />
           </View>
 
           <FlatList
@@ -603,7 +693,25 @@ export default function App() {
           roster={roster}
           onBack={() => navigate({ view: 'race' })}
           onRaceClick={(race) => {
-            if (!race.completed) {
+            if (!race.completed && race.startTime > Date.now()) {
+              // Future race - show expected racers with no times
+              const expectedRacers = (race.racerIds || []).map((id, index) => {
+                const racer = roster.find(r => r.id === id);
+                if (racer) {
+                  return {
+                    ...racer,
+                    finishTime: undefined,
+                    lane: index + 1,
+                    status: 'waiting' as const,
+                    position: 0,
+                  };
+                }
+                return null;
+              }).filter(Boolean) as Racer[];
+              setRaceResults(expectedRacers);
+              setResultsTrackName(race.track?.name);
+              setShowResultsDrawer(true);
+            } else if (!race.completed) {
               navigate({ view: 'race' });
             } else if (race.results && race.results.length > 0) {
               const results = race.results.map((id, index) => {
@@ -622,6 +730,7 @@ export default function App() {
               setShowResultsDrawer(true);
             }
           }}
+          onKillRace={killRace}
         />
       )}
 

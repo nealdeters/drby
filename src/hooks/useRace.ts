@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { SharedValue, makeMutable, withTiming } from 'react-native-reanimated';
 import { Racer, Track } from '../gameTypes';
-import { getRaceChannel, getAblyClient } from '../services/apiClient';
+import { getRaceChannel, getAblyClient, API_URL, headers } from '../services/apiClient';
 
 interface UseRaceProps {
   racers: Racer[];
@@ -24,16 +24,16 @@ interface RaceUpdate {
 const validateRaceUpdate = (update: RaceUpdate, currentRaceId: string): boolean => {
   const now = Date.now();
   const isValidRaceId = update.raceId === currentRaceId;
-  const isRecent = (now - update.timestamp) < 30000; // Reject updates older than 30 seconds
-  const isNotFuture = update.timestamp <= now + 5000; // Reject updates more than 5 seconds in future
+  const isRecent = (now - update.timestamp) < 180000; // Reject updates older than 3 minutes
   
-  return isValidRaceId && isRecent && isNotFuture;
+  return isValidRaceId && isRecent;
 };
 
 export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFinish }: UseRaceProps) => {
   // React State for the UI List (throttled updates)
   const [racers, setRacers] = useState<Racer[]>([]);
   const [isRacing, setIsRacing] = useState(false);
+  const [raceStartTime, setRaceStartTime] = useState<number | null>(null);
   
   // Refs for tracking
   const racersRef = useRef<Racer[]>([]);
@@ -91,6 +91,30 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
 
       console.log(`📡 Subscribing to race: ${raceId}`);
 
+      const checkExistingRace = async () => {
+        try {
+          const response = await fetch(`${API_URL}/race-manager?action=status&raceId=${raceId}`, {
+            method: 'GET',
+            headers,
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            if (result.exists && !result.isFinished) {
+              console.log('[useRace] Race already in progress, fetching current state...');
+              setIsRacing(true);
+              if (result.startTime) {
+                setRaceStartTime(result.startTime);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[useRace] Failed to check race status:', err);
+        }
+      };
+      
+      checkExistingRace();
+
       channel.subscribe('race-update', (message: any) => {
         const update = message.data as RaceUpdate;
         const now = Date.now();
@@ -106,6 +130,9 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
         if (update.type === 'started') {
           console.log('🚀 Race started - setting isRacing=true, racers:', update.racers?.map(r => r.name));
           setIsRacing(true);
+          if (update.timestamp) {
+            setRaceStartTime(update.timestamp);
+          }
           if (update.racers) {
             racersRef.current = update.racers;
             setRacers(update.racers);
@@ -143,6 +170,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
         } else if (update.type === 'finished') {
           console.log('🏁 Race finished');
           setIsRacing(false);
+          setRaceStartTime(null);
           if (update.results) {
             racersRef.current = update.results;
             setRacers(update.results);
@@ -177,6 +205,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     racersRef.current = newRacers;
     setRacers(newRacers);
     setIsRacing(false);
+    setRaceStartTime(null);
     lastStateUpdate.current = 0;
     
     // Reset shared values
@@ -213,5 +242,5 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     console.log('🔍 useRace state change: isRacing=', isRacing, 'racers.length=', racers.length, 'racers:', racers.map(r => `${r.name}:${r.status}`));
   }, [isRacing, racers]);
 
-  return { racers, isRacing, startRace, stopRace, progressMap };
+  return { racers, isRacing, raceStartTime, startRace, stopRace, progressMap };
 };

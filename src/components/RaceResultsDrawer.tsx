@@ -103,7 +103,7 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
       {/* Header */}
       <View style={{ paddingHorizontal: 20, paddingBottom: 16 }}>
         <Text style={{ fontSize: 24, fontWeight: '900', color: theme.text.primary, letterSpacing: -0.5 }}>
-          Race Results
+          {results.some(r => r.finishTime) ? 'Race Results' : 'Expected Racers'}
         </Text>
         {trackName && (
           <Text style={{ fontSize: 14, color: theme.text.secondary, marginTop: 4 }}>
@@ -177,6 +177,17 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
                     marginLeft: 8 
                   }}>
                     <Text style={{ fontSize: 10, color: '#fff', fontWeight: '600' }}>INJURED</Text>
+                  </View>
+                )}
+                {racer.status === 'dnf' && (
+                  <View style={{ 
+                    backgroundColor: '#6B7280', 
+                    paddingHorizontal: 8, 
+                    paddingVertical: 2, 
+                    borderRadius: 8,
+                    marginLeft: 8 
+                  }}>
+                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: '600' }}>DNF</Text>
                   </View>
                 )}
               </View>

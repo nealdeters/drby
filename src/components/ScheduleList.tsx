@@ -8,9 +8,10 @@ interface ScheduleListProps {
   roster: Racer[];
   onBack: () => void;
   onRaceClick?: (race: RaceEvent) => void;
+  onKillRace?: (raceId: string) => void;
 }
 
-export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: ScheduleListProps): React.ReactElement => {
+export const ScheduleList = ({ schedule, roster, onBack, onRaceClick, onKillRace }: ScheduleListProps): React.ReactElement => {
   const [filter, setFilter] = React.useState<'upcoming' | 'all'>('upcoming');
   const now = Date.now();
   
@@ -138,6 +139,27 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
               #{index + 1}
             </Text>
           </View>
+          
+          {isInProgress && onKillRace && (
+            <TouchableOpacity
+              onPress={() => onKillRace(race.id)}
+              style={{
+                marginLeft: 8,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 8,
+                backgroundColor: theme.semantic.error,
+              }}
+            >
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '700',
+                color: 'white',
+              }}>
+                KILL
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -313,7 +335,7 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
             data={displayedRaces}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ padding: 16, paddingTop: 0 }}
-            renderItem={({ item, index }) => renderRaceItem(item, index, item.completed, item.completed)}
+            renderItem={({ item, index }) => renderRaceItem(item, index, item.completed, true)}
             ListHeaderComponent={
               <View>
                 {inProgressRaces.length > 0 && (

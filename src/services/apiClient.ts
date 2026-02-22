@@ -2,6 +2,11 @@ import { Platform } from 'react-native';
 import * as Ably from 'ably';
 
 export const getBaseUrl = () => {
+  // Allow override for local dev with mobile devices
+  if (import.meta.env.VITE_DEV_URL) {
+    return import.meta.env.VITE_DEV_URL;
+  }
+
   // 1. If running in production (Netlify), use the relative path or absolute URL
   if (!__DEV__) {
     return 'https://drby-live.netlify.app';
@@ -27,6 +32,18 @@ export const headers = {
   'x-api-key': import.meta.env.VITE_API_KEY as string || '',
 };
 
+// Get or create a client ID for Ably
+const getClientId = (): string => {
+  let clientId = localStorage.getItem('drby-client-id');
+  if (!clientId) {
+    clientId = `client-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    localStorage.setItem('drby-client-id', clientId);
+  }
+  return clientId;
+};
+
+export { getClientId };
+
 // Ably Realtime client (for WebSocket connections)
 let ablyClient: Ably.Realtime | null = null;
 
@@ -39,8 +56,12 @@ export const getAblyClient = () => {
     return null;
   }
   if (!ablyClient) {
-    ablyClient = new Ably.Realtime(ablyKey);
-    console.log('[Ably] Client initialized');
+    const clientId = getClientId();
+    ablyClient = new Ably.Realtime({
+      key: ablyKey,
+      clientId: clientId,
+    });
+    console.log('[Ably] Client initialized with clientId:', clientId);
     
     ablyClient.connection.on('connected', () => {
       console.log('[Ably] Connection connected');

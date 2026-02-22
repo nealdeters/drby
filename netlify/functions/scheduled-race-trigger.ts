@@ -1,5 +1,6 @@
 import { Handler } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
+import Ably from "ably";
 
 /**
  * Netlify Scheduled Function
@@ -94,6 +95,23 @@ export const handler: Handler = async (event: any) => {
       if (response.ok) {
         console.log(`✅ Race started successfully: ${race.id}`);
         triggeredRaces.push(race.id);
+
+        const ablyApiKey = process.env.ABLY_API_KEY;
+        if (ablyApiKey) {
+          try {
+            const ably = new Ably.Rest(ablyApiKey);
+            const controlChannel = ably.channels.get(`race:${race.id}:control`);
+            await controlChannel.publish('race-trigger', {
+              raceId: race.id,
+              timestamp: Date.now(),
+              racers: selectedRacers,
+              track: race.track,
+            });
+            console.log(`📡 Published race-trigger to Ably for race ${race.id}`);
+          } catch (ablyErr) {
+            console.error(`⚠️ Failed to publish to Ably for race ${race.id}:`, ablyErr);
+          }
+        }
       } else {
         const error = await response.text();
         console.error(`❌ Failed to start race ${race.id}:`, error);
