@@ -411,11 +411,44 @@ export const handler: Handler = async (event: HandlerEvent) => {
   activeRaces.set(raceId, raceInterval);
 
   // Safety cleanup: Force stop race after 5 minutes
-  setTimeout(() => {
+  setTimeout(async () => {
     if (activeRaces.has(raceId)) {
       clearInterval(activeRaces.get(raceId)!);
       activeRaces.delete(raceId);
       console.log(`⏱️ Race ${raceId} timed out after 5 minutes`);
+
+      const results = [...raceRacers].sort((a, b) => 
+        (a.finishTime || Infinity) - (b.finishTime || Infinity)
+      );
+
+      try {
+        await channel.publish('race-update', {
+          type: 'finished',
+          raceId,
+          timestamp: Date.now(),
+          results,
+          timedOut: true,
+        } as RaceUpdate);
+
+        const siteId = process.env.NETLIFY_SITE_ID;
+        const token = process.env.NETLIFY_AUTH_TOKEN;
+        if (siteId && token) {
+          const store = getStore('races', { siteID: siteId, token });
+          await store.set(raceId, JSON.stringify({
+            id: raceId,
+            track,
+            results: results.map(r => r.id),
+            finishTimes: results.reduce((acc, r) => {
+              if (r.finishTime) acc[r.id] = r.finishTime;
+              return acc;
+            }, {} as Record<string, number>),
+            timestamp: Date.now(),
+            timedOut: true,
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to save timeout race results:', err);
+      }
     }
   }, 5 * 60 * 1000);
 
