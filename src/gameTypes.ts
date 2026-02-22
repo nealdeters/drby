@@ -43,6 +43,7 @@ export interface RaceEvent {
   racerIds: string[];
   completed: boolean;
   results?: string[]; // racerIds in order of finish
+  finishTimes?: Record<string, number>; // racerId -> finish time in ms
 }
 
 export type ViewState = 'race' | 'roster' | 'standings' | 'season' | 'seasons' | 'schedule' | 'profile' | 'tracks' | 'historical-standings' | 'historical-racer-profile';

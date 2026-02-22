@@ -12,7 +12,7 @@ describe('RacerProfile', () => {
   };
 
   it('renders correctly', () => {
-    const { getByText } = render(<RacerProfile stats={mockStats} currentSeasonPoints={10} currentSeasonNumber={1} onBack={() => {}} />);
+    const { getByText } = render(<RacerProfile stats={mockStats} currentSeasonPoints={10} currentSeasonNumber={1} schedule={[]} onBack={() => {}} />);
     expect(getByText(/Test Racer/i)).toBeTruthy();
   });
 });

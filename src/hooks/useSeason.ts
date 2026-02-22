@@ -117,6 +117,24 @@ export const useSeason = () => {
             setNextRace(next || null);
             console.log('📅 Restored saved schedule with', savedSchedule.length, 'races');
             console.log('📊 Loaded existing standings:', savedStandings);
+
+            // Auto-skip any races that are more than 5 minutes overdue
+            const now = Date.now();
+            const overdueRaces = savedSchedule.filter(r => 
+              !r.completed && r.startTime < now - (5 * 60 * 1000)
+            );
+            if (overdueRaces.length > 0) {
+              console.log('⏭️ Auto-skipping', overdueRaces.length, 'overdue races');
+              const updated = savedSchedule.map(r => {
+                if (overdueRaces.some(or => or.id === r.id)) {
+                  return { ...r, completed: true, results: [] };
+                }
+                return r;
+              });
+              setSchedule(updated);
+              const newNext = updated.find(r => !r.completed);
+              setNextRace(newNext || null);
+            }
           }
         } else {
           // Generate new schedule for fresh season
@@ -418,14 +436,18 @@ export const useSeason = () => {
 
   const completeRace = useCallback((raceId: string, results: Racer[]) => {
     console.log('🏁 Completing race:', raceId);
-    console.log('📊 Race results:', results.map((r, i) => `${i + 1}. ${r.name} (${r.id})`));
+    console.log('📊 Race results:', results.map((r, i) => `${i + 1}. ${r.name} (${r.id}) finishTime: ${r.finishTime}`));
     
     setSchedule(prev => {
       const idx = prev.findIndex(r => r.id === raceId);
       if (idx === -1) return prev;
       
       const updated = [...prev];
-      updated[idx] = { ...updated[idx], completed: true, results: results.map(r => r.id) };
+      const finishTimes = results.reduce((acc, r) => {
+        if (r.finishTime) acc[r.id] = r.finishTime;
+        return acc;
+      }, {} as Record<string, number>);
+      updated[idx] = { ...updated[idx], completed: true, results: results.map(r => r.id), finishTimes };
       
       // Set next race - find next upcoming race by scheduled time
       const now = Date.now();

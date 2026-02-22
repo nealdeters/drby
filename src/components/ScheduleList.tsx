@@ -7,20 +7,21 @@ interface ScheduleListProps {
   schedule: RaceEvent[];
   roster: Racer[];
   onBack: () => void;
+  onRaceClick?: (race: RaceEvent) => void;
 }
 
-export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) => {
+export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: ScheduleListProps): React.ReactElement => {
   const now = Date.now();
   
-  // Filter to today's races (within 24 hours from now)
   const todayRaces = schedule
     .filter(race => race.startTime >= now - 24 * 60 * 60 * 1000)
     .sort((a, b) => a.startTime - b.startTime);
 
-  // Separate upcoming and completed
   const upcomingRaces = todayRaces.filter(race => !race.completed && race.startTime >= now);
   const completedRaces = todayRaces.filter(race => race.completed);
   const inProgressRaces = todayRaces.filter(race => !race.completed && race.startTime < now);
+
+  const nextUpRace = upcomingRaces[0] || null;
 
   const getRacerNames = (racerIds: string[]) => {
     const names = racerIds
@@ -43,10 +44,10 @@ export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) =>
     return `${minutes}m`;
   };
 
-  const renderRaceItem = (race: RaceEvent, index: number, isCompleted: boolean) => {
+  const renderRaceItem = (race: RaceEvent, index: number, isCompleted: boolean, isClickable = false) => {
     const isInProgress = !race.completed && race.startTime < now;
     
-    return (
+    const item = (
       <View
         key={race.id}
         style={{
@@ -57,6 +58,8 @@ export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) =>
           padding: 16,
           marginBottom: 12,
           opacity: isCompleted ? 0.6 : 1,
+          borderWidth: isInProgress ? 2 : 0,
+          borderColor: isInProgress ? theme.semantic.warning : 'transparent',
         }}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -137,6 +140,76 @@ export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) =>
         </View>
       </View>
     );
+
+    if (isClickable && onRaceClick) {
+      return (
+        <TouchableOpacity key={race.id} onPress={() => onRaceClick(race)}>
+          {item}
+        </TouchableOpacity>
+      );
+    }
+
+    return item;
+  };
+
+  const renderNextUp = () => {
+    if (!nextUpRace) return null;
+    
+    return (
+      <TouchableOpacity 
+        onPress={() => onRaceClick?.(nextUpRace)}
+        style={{
+          backgroundColor: theme.surface.elevated,
+          borderRadius: 16,
+          padding: 16,
+          marginBottom: 16,
+          borderWidth: 2,
+          borderColor: theme.semantic.success,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+          <Text style={{
+            fontSize: 12,
+            fontWeight: '700',
+            color: theme.semantic.success,
+            textTransform: 'uppercase',
+            letterSpacing: 1,
+          }}>
+            ⏱️ Next Up
+          </Text>
+          <Text style={{
+            fontSize: 11,
+            color: theme.text.tertiary,
+            marginLeft: 8,
+          }}>
+            in {formatTimeUntil(nextUpRace.startTime)}
+          </Text>
+        </View>
+        <Text style={{
+          fontSize: 20,
+          fontWeight: '800',
+          color: theme.text.primary,
+          marginBottom: 4,
+        }}>
+          {nextUpRace.track?.name || 'Unknown Track'}
+        </Text>
+        <Text style={{
+          fontSize: 13,
+          color: theme.text.secondary,
+        }}>
+          {nextUpRace.track?.length}m × {nextUpRace.track?.laps} laps • {nextUpRace.racerIds.length} racers
+        </Text>
+        {nextUpRace.racerIds.length > 0 && (
+          <Text style={{
+            fontSize: 12,
+            color: theme.text.tertiary,
+            marginTop: 6,
+          }}>
+            {getRacerNames(nextUpRace.racerIds)}
+          </Text>
+        )}
+      </TouchableOpacity>
+    );
   };
 
   return (
@@ -147,7 +220,6 @@ export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) =>
         flex: 1,
         overflow: 'hidden' 
       }}>
-        {/* Header */}
         <View style={{ 
           padding: 20,
           flexDirection: 'row',
@@ -172,17 +244,6 @@ export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) =>
               {todayRaces.length} race{todayRaces.length !== 1 ? 's' : ''} today
             </Text>
           </View>
-          {/* <TouchableOpacity
-            onPress={onBack}
-            style={{
-              paddingHorizontal: 16,
-              paddingVertical: 8,
-              backgroundColor: theme.surface.elevated,
-              borderRadius: 20,
-            }}
-          >
-            <Text style={{ color: theme.text.primary, fontWeight: '600' }}>← Back</Text>
-          </TouchableOpacity> */}
         </View>
 
         {todayRaces.length === 0 ? (
@@ -214,8 +275,8 @@ export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) =>
           <FlatList
             data={todayRaces}
             keyExtractor={(item) => item.id}
-            contentContainerStyle={{ padding: 16 }}
-            renderItem={({ item, index }) => renderRaceItem(item, index, item.completed)}
+            contentContainerStyle={{ padding: 16, paddingTop: 0 }}
+            renderItem={({ item, index }) => renderRaceItem(item, index, item.completed, item.completed)}
             ListHeaderComponent={
               <View>
                 {inProgressRaces.length > 0 && (
@@ -230,10 +291,11 @@ export const ScheduleList = ({ schedule, roster, onBack }: ScheduleListProps) =>
                     }}>
                       🔴 In Progress
                     </Text>
-                    {inProgressRaces.map((race, idx) => renderRaceItem(race, idx, false))}
+                    {inProgressRaces.map((race, idx) => renderRaceItem(race, idx, false, true))}
                   </View>
                 )}
-                {upcomingRaces.length > 0 && (
+                {renderNextUp()}
+                {upcomingRaces.length > 0 && !inProgressRaces.length && (
                   <View style={{ marginBottom: 8 }}>
                     <Text style={{
                       fontSize: 12,

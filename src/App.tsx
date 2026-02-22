@@ -5,7 +5,7 @@ import { View, FlatList, Text, SafeAreaView, TouchableOpacity, StatusBar, Dimens
 import { RaceTrack } from './components/RaceTrack';
 import { useRace } from './hooks/useRace';
 import { useSeason, CompletedSeason } from './hooks/useSeason';
-import { Racer, Track } from './gameTypes';
+import { Racer, Track, RaceEvent } from './gameTypes';
 import { useRouter, ViewState } from './hooks/useRouter';
 import { formatCountdown } from './utils/format';
 import { getRacerStats } from './utils/stats';
@@ -20,6 +20,7 @@ import { SeasonsList } from './components/SeasonsList';
 import { ScheduleList } from './components/ScheduleList';
 import { Toast } from './components/Toast';
 import { RaceResultsDrawer } from './components/RaceResultsDrawer';
+import { RacerRacesDrawer } from './components/RacerRacesDrawer';
 import { theme } from './theme';
 
 const LOADING_TRACK: Track = { id: '0', name: 'Loading', surface: 'asphalt', length: 1000, laps: 3 };
@@ -125,6 +126,7 @@ export default function App() {
   // Countdown Timer & Race Trigger
   const [timeLeft, setTimeLeft] = useState(0);
   const [showNextRaceCountdown, setShowNextRaceCountdown] = useState(false);
+  const [raceElapsedTime, setRaceElapsedTime] = useState(0);
   
   // Toast state for notifications
   const [toastVisible, setToastVisible] = useState(false);
@@ -133,6 +135,11 @@ export default function App() {
   // Race results drawer state
   const [showResultsDrawer, setShowResultsDrawer] = useState(false);
   const [raceResults, setRaceResults] = useState<Racer[]>([]);
+  const [resultsTrackName, setResultsTrackName] = useState<string | undefined>();
+  
+  // Racer races drawer state
+  const [showRacerRacesDrawer, setShowRacerRacesDrawer] = useState(false);
+  const [racerRacesSchedule, setRacerRacesSchedule] = useState<RaceEvent[]>([]);
   
   // Track previous racer statuses for injury detection
   const previousRacerStatuses = useRef<Record<string, string>>({});
@@ -167,6 +174,24 @@ export default function App() {
     }
   }, [isRacing]);
   
+  // Race elapsed time tracker
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    
+    if (isRacing) {
+      const startTime = Date.now() - raceElapsedTime;
+      interval = setInterval(() => {
+        setRaceElapsedTime(Date.now() - startTime);
+      }, 100);
+    } else {
+      setRaceElapsedTime(0);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isRacing]);
+
   // Reset trigger flag when race state changes
   useEffect(() => {
     if (!isRacing && currentRaceId.current) {
@@ -482,6 +507,25 @@ export default function App() {
             )} */}
           </View>
 
+          {/* Race Timer */}
+          {isRacing && (
+            <View style={{ alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ 
+                fontSize: 32, 
+                fontWeight: '900', 
+                color: theme.text.primary,
+                fontVariant: ['tabular-nums'],
+              }}>
+                {(() => {
+                  const totalSeconds = Math.floor(raceElapsedTime / 1000);
+                  const minutes = Math.floor(totalSeconds / 60);
+                  const seconds = totalSeconds % 60;
+                  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                })()}
+              </Text>
+            </View>
+          )}
+
           <View className="h-[300px] w-full" style={{ height: 300, width: '100%' }}>
             <RaceTrack racers={racers} track={nextRace?.track || LOADING_TRACK} progressMap={progressMap} />
           </View>
@@ -515,6 +559,16 @@ export default function App() {
           schedule={schedule} 
           roster={roster}
           onBack={() => navigate({ view: 'race' })}
+          onRaceClick={(race) => {
+            if (!race.completed) {
+              navigate({ view: 'race' });
+            } else if (race.results && race.results.length > 0) {
+              const results = race.results.map(id => roster.find(r => r.id === id)).filter(Boolean) as Racer[];
+              setRaceResults(results);
+              setResultsTrackName(race.track?.name);
+              setShowResultsDrawer(true);
+            }
+          }}
         />
       )}
 
@@ -606,7 +660,13 @@ export default function App() {
           stats={getRacerStats(selectedRacerId, roster, schedule)!} 
           currentSeasonPoints={standings[selectedRacerId] || 0}
           currentSeasonNumber={currentSeasonNumber}
-          onBack={() => goBack()} 
+          schedule={schedule}
+          onBack={() => goBack()}
+          onOpenRacesDrawer={() => {
+            const racerSchedule = schedule.filter(r => r.racerIds.includes(selectedRacerId) && r.completed);
+            setRacerRacesSchedule(racerSchedule);
+            setShowRacerRacesDrawer(true);
+          }}
         />
       )}
 
@@ -714,7 +774,8 @@ export default function App() {
               }}
               currentSeasonPoints={historicalStats.points}
               currentSeasonNumber={selectedHistoricalSeason.number}
-              onBack={() => goBack()} 
+              schedule={[]}
+              onBack={() => goBack()}
             />
           );
         })()
@@ -953,8 +1014,17 @@ export default function App() {
       <RaceResultsDrawer
         visible={showResultsDrawer}
         results={raceResults}
-        trackName={nextRace?.track?.name}
+        trackName={resultsTrackName || nextRace?.track?.name}
         onClose={() => setShowResultsDrawer(false)}
+      />
+
+      {/* Racer Races Drawer */}
+      <RacerRacesDrawer
+        visible={showRacerRacesDrawer}
+        racerId={selectedRacerId || ''}
+        roster={roster}
+        races={racerRacesSchedule}
+        onClose={() => setShowRacerRacesDrawer(false)}
       />
     </SafeAreaView>
   );

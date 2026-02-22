@@ -5,6 +5,7 @@ export type ViewState =
   | 'schedule'
   | 'standings' 
   | 'profile' 
+  | 'racer-races'
   | 'seasons' 
   | 'historical-standings' 
   | 'historical-racer-profile' 
