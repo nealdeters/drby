@@ -32,8 +32,13 @@ let ablyClient: Ably.Realtime | null = null;
 
 export const getAblyClient = () => {
   const ablyKey = import.meta.env.VITE_ABLY_API_KEY as string | undefined;
-  console.log('[Ably] Checking for API key, found:', ablyKey ? 'yes' : 'no', 'URL:', typeof window !== 'undefined' ? window.location.href : 'N/A');
-  if (!ablyClient && ablyKey) {
+  const isDev = import.meta.env.DEV;
+  console.log('[Ably] Checking for API key, found:', ablyKey ? 'yes' : 'no', '| DEV:', isDev, '| URL:', typeof window !== 'undefined' ? window.location.href : 'N/A');
+  if (!ablyKey) {
+    console.error('[Ably] FATAL: VITE_ABLY_API_KEY is not set!');
+    return null;
+  }
+  if (!ablyClient) {
     ablyClient = new Ably.Realtime(ablyKey);
     console.log('[Ably] Client initialized');
     
@@ -53,7 +58,8 @@ export const getAblyClient = () => {
 export const getRaceChannel = (raceId: string) => {
   const client = getAblyClient();
   if (!client) {
-    throw new Error('Ably client not initialized - ABLY_API_KEY not configured');
+    console.error('[Ably] Cannot get channel - client not initialized');
+    throw new Error('Ably client not initialized - check VITE_ABLY_API_KEY environment variable');
   }
   return client.channels.get(`race:${raceId}`);
 };

@@ -54,6 +54,22 @@ export default function App() {
   const isMobile = useIsMobile();
   const { roster, schedule, standings, nextRace, completeRace, skipOverdueRace, tracks, completedSeasons, currentSeasonNumber } = useSeason();
   
+  // Resolve actual historical season from completedSeasons if only id is provided
+  const resolvedHistoricalSeason = useMemo(() => {
+    if (!selectedHistoricalSeason) return null;
+    if (selectedHistoricalSeason.finalStandings) return selectedHistoricalSeason;
+    // Look up season by id in completedSeasons
+    return completedSeasons.find(s => s.id === selectedHistoricalSeason.id) || null;
+  }, [selectedHistoricalSeason, completedSeasons]);
+  
+  // Redirect to seasons list if trying to view historical season that can't be resolved
+  useEffect(() => {
+    if (completedSeasons.length > 0 && selectedHistoricalSeason && !resolvedHistoricalSeason) {
+      console.log('🔍 Season not found, redirecting to seasons');
+      navigate({ view: 'seasons' });
+    }
+  }, [completedSeasons, selectedHistoricalSeason, resolvedHistoricalSeason, navigate]);
+  
   // Helper function to find next upcoming race (even if not immediate next)
   const getNextUpcomingRace = useCallback(() => {
     const now = Date.now();
@@ -224,6 +240,11 @@ export default function App() {
 
   // Enhanced race trigger with retry mechanism
   const triggerRaceWithRetry = useCallback(async (race: any, racers: Racer[], retryCount = 0) => {
+    console.log(`🚀 Triggering race ${race.id} (attempt ${retryCount + 1})`, { 
+      apiUrl: API_URL, 
+      racersCount: racers.length,
+      isDev: import.meta.env.DEV 
+    });
     try {
       const response = await fetch(`${API_URL}/race-manager`, {
         method: 'POST',
@@ -236,10 +257,12 @@ export default function App() {
       });
       
       if (!response.ok) {
-        throw new Error(`Race manager returned ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Race manager returned ${response.status}: ${errorText}`);
       }
       
-      console.log('✅ Race triggered successfully:', race.id);
+      const result = await response.json();
+      console.log('✅ Race triggered successfully:', race.id, result);
       // Clear the safety timeout since request succeeded
       if (raceStartTimeout.current) {
         clearTimeout(raceStartTimeout.current);
@@ -362,7 +385,7 @@ export default function App() {
     }
     
     // Normal countdown for future races
-    const updateCountdown = () => {
+    const updateCountdown = async () => {
       const diff = upcomingRace.startTime - Date.now();
       if (diff <= 0 && !raceStartTriggered.current) {
         raceStartTriggered.current = true;
@@ -376,6 +399,26 @@ export default function App() {
           resetRaceTrigger();
           return;
         }
+        
+        // Check if race was already triggered by server-side scheduled function
+        try {
+          const checkResponse = await fetch(`${API_URL}/race-manager?action=status`, {
+            method: 'GET',
+            headers
+          });
+          if (checkResponse.ok) {
+            const checkResult = await checkResponse.json();
+            const raceExists = checkResult.activeRaces?.includes(upcomingRace.id);
+            if (raceExists) {
+              console.log('⏭️ Race already triggered by server, skipping client trigger');
+              clearCountdownInterval();
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ Could not check race status, proceeding with trigger:', err);
+        }
+        
         triggerRaceWithRetry(upcomingRace, currentRaceRacers);
         clearCountdownInterval();
       } else if (diff > 0) {
@@ -665,9 +708,12 @@ export default function App() {
         </View>
       )}
 
-      {view === 'profile' && selectedRacerId && (
+      {view === 'profile' && selectedRacerId && roster.length > 0 && (() => {
+        const racerStats = getRacerStats(selectedRacerId, roster, schedule);
+        if (!racerStats) return null;
+        return (
         <RacerProfile 
-          stats={getRacerStats(selectedRacerId, roster, schedule)!} 
+          stats={racerStats} 
           currentSeasonPoints={standings[selectedRacerId] || 0}
           currentSeasonNumber={currentSeasonNumber}
           schedule={schedule}
@@ -695,20 +741,21 @@ export default function App() {
           }}
           onTrackClick={() => navigate({ view: 'tracks' })}
         />
-      )}
+        );
+      })()}
 
-      {view === 'historical-racer-profile' && selectedHistoricalSeason && selectedHistoricalRacerId && (
+      {view === 'historical-racer-profile' && resolvedHistoricalSeason && selectedHistoricalRacerId && (
         (() => {
           // Try to use racerStats if available, otherwise generate from finalStandings
           let historicalStats;
-          if (selectedHistoricalSeason.racerStats && Array.isArray(selectedHistoricalSeason.racerStats)) {
-            historicalStats = selectedHistoricalSeason.racerStats.find((r: any) => r.id === selectedHistoricalRacerId);
+          if (resolvedHistoricalSeason.racerStats && Array.isArray(resolvedHistoricalSeason.racerStats)) {
+            historicalStats = resolvedHistoricalSeason.racerStats.find((r: any) => r.id === selectedHistoricalRacerId);
             console.log('Found racer in racerStats:', historicalStats?.name);
           }
           
           if (!historicalStats) {
             // Fallback: Try to generate from finalStandings and current roster
-            const points = selectedHistoricalSeason.finalStandings?.[selectedHistoricalRacerId];
+            const points = resolvedHistoricalSeason.finalStandings?.[selectedHistoricalRacerId];
             if (points !== undefined) {
               console.log('Generating fallback racer data from finalStandings for', selectedHistoricalRacerId);
               
@@ -728,7 +775,7 @@ export default function App() {
                   first: 0,
                   second: 0,
                   third: 0,
-                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                  racesRun: resolvedHistoricalSeason.totalRaces || 0
                 };
               } else {
                 historicalStats = {
@@ -743,7 +790,7 @@ export default function App() {
                   first: 0,
                   second: 0,
                   third: 0,
-                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                  racesRun: resolvedHistoricalSeason.totalRaces || 0
                 };
               }
             }
@@ -797,10 +844,10 @@ export default function App() {
                 first: historicalStats.first,
                 second: historicalStats.second,
                 third: historicalStats.third,
-                racesRun: selectedHistoricalSeason.totalRaces
+                racesRun: resolvedHistoricalSeason.totalRaces
               }}
               currentSeasonPoints={historicalStats.points}
-              currentSeasonNumber={selectedHistoricalSeason.number}
+              currentSeasonNumber={resolvedHistoricalSeason.number}
               schedule={[]}
               completedSeasons={completedSeasons}
               onBack={() => goBack()}
@@ -823,10 +870,10 @@ export default function App() {
         />
       )}
 
-      {view === 'historical-standings' && selectedHistoricalSeason && (
+      {view === 'historical-standings' && resolvedHistoricalSeason && (
         (() => {
           // Check if we have valid data to work with
-          if (!selectedHistoricalSeason.finalStandings || typeof selectedHistoricalSeason.finalStandings !== 'object') {
+          if (!resolvedHistoricalSeason.finalStandings || typeof resolvedHistoricalSeason.finalStandings !== 'object') {
             console.error('Invalid historical season data: missing finalStandings');
             return (
               <View style={{ flex: 1, padding: 16, alignItems: 'center', justifyContent: 'center' }}>
@@ -852,12 +899,12 @@ export default function App() {
 
           // Try to use racerStats if available, otherwise merge with current roster data
           let standingsData;
-          if (selectedHistoricalSeason.racerStats && Array.isArray(selectedHistoricalSeason.racerStats) && selectedHistoricalSeason.racerStats.length > 0) {
+          if (resolvedHistoricalSeason.racerStats && Array.isArray(resolvedHistoricalSeason.racerStats) && resolvedHistoricalSeason.racerStats.length > 0) {
             // Use the saved racerStats which should have full racer info
-            standingsData = selectedHistoricalSeason.racerStats;
+            standingsData = resolvedHistoricalSeason.racerStats;
           } else {
             // Fallback: Merge finalStandings with current roster to get actual racer data
-            standingsData = Object.entries(selectedHistoricalSeason.finalStandings).map(([racerId, points]) => {
+            standingsData = Object.entries(resolvedHistoricalSeason.finalStandings).map(([racerId, points]) => {
               // Find the actual racer from current roster
               const actualRacer = roster.find(r => r.id === racerId);
               
@@ -875,7 +922,7 @@ export default function App() {
                   first: 0, // These would come from historical stats if available
                   second: 0,
                   third: 0,
-                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                  racesRun: resolvedHistoricalSeason.totalRaces || 0
                 };
               } else {
                 // Racer not found in current roster, use fallback
@@ -891,7 +938,7 @@ export default function App() {
                   first: 0,
                   second: 0,
                   third: 0,
-                  racesRun: selectedHistoricalSeason.totalRaces || 0
+                  racesRun: resolvedHistoricalSeason.totalRaces || 0
                 };
               }
             });
@@ -919,7 +966,7 @@ export default function App() {
                       color: theme.text.primary,
                       letterSpacing: -0.5
                     }}>
-                      Season {selectedHistoricalSeason.number}
+                      Season {resolvedHistoricalSeason.number}
                     </Text>
                     <Text style={{ 
                       fontSize: 12, 
@@ -1119,6 +1166,10 @@ export default function App() {
         roster={roster}
         races={racerRacesSchedule}
         onClose={() => setShowRacerRacesDrawer(false)}
+        onRacerClick={(racerId) => {
+          setShowRacerRacesDrawer(false);
+          navigate({ selectedRacerId: racerId, view: 'profile' });
+        }}
       />
     </SafeAreaView>
   );

@@ -306,7 +306,9 @@ export const useSeason = () => {
       setRoster(prev => prev.map(r => ({ ...r, health: 100 })));
       
       // Generate new schedule
-      await generateSchedule(currentRoster, currentTracks, newSeasonNumber);
+      const newSchedule = await generateSchedule(currentRoster, currentTracks, newSeasonNumber);
+      setSchedule(newSchedule);
+      await racesService.saveSeasonSchedule(newSchedule);
       
       console.log('✅ New season started from init:', newSeasonNumber);
     } catch (error) {
@@ -403,7 +405,9 @@ export const useSeason = () => {
     await racesService.saveSeasonSchedule([]);
     
     // Generate new schedule
-    await generateSchedule(roster, tracks);
+    const newSchedule = await generateSchedule(roster, tracks);
+    setSchedule(newSchedule);
+    await racesService.saveSeasonSchedule(newSchedule);
     
     console.log('✅ New season started:', newSeasonNumber);
     } catch (error) {

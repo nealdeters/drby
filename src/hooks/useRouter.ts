@@ -67,8 +67,11 @@ export const useRouter = () => {
     
     console.log('🔍 Parsing URL:', window.location.search);
     
+    // Get the view from URL
     const view = params.get('view') as ViewState;
-    if (view && ['race', 'schedule', 'standings', 'profile', 'seasons', 'historical-standings', 'historical-racer-profile', 'tracks'].includes(view)) {
+    const validViews: ViewState[] = ['race', 'schedule', 'standings', 'profile', 'seasons', 'historical-standings', 'historical-racer-profile', 'tracks'];
+    
+    if (view && validViews.includes(view)) {
       newState.view = view;
       console.log('🔍 Restored view:', view);
     }
@@ -76,30 +79,41 @@ export const useRouter = () => {
     const racerId = params.get('racer');
     if (racerId) {
       newState.selectedRacerId = racerId;
-      newState.view = 'profile';
+      // If we have a racer but no view or invalid view, default to profile
+      if (!newState.view) {
+        newState.view = 'profile';
+      }
       console.log('🔍 Restored racerId:', racerId);
     }
     
     const seasonId = params.get('season');
     if (seasonId) {
-      // This would need to be resolved with actual season data
       newState.selectedHistoricalSeason = { id: seasonId };
-      newState.view = 'historical-standings';
+      if (!newState.view) {
+        newState.view = 'historical-standings';
+      }
+      console.log('🔍 Restored seasonId:', seasonId);
     }
     
     const historicalRacerId = params.get('historicalRacer');
     if (historicalRacerId) {
       newState.selectedHistoricalRacerId = historicalRacerId;
-      newState.view = 'historical-racer-profile';
+      if (!newState.view) {
+        newState.view = 'historical-racer-profile';
+      }
+      console.log('🔍 Restored historicalRacerId:', historicalRacerId);
     }
     
-    if (Object.keys(newState).length > 0) {
+    // Always set initialized first
+    setInitialized(true);
+    
+    // Only apply the state if there's a valid view to show
+    if (newState.view) {
       console.log('🔍 Restoring state:', newState);
       setState(prev => ({ ...prev, ...newState }));
     } else {
-      console.log('🔍 No URL params to restore, using default state');
+      console.log('🔍 No valid view in URL, staying on default race view');
     }
-    setInitialized(true);
   }, []);
 
   const navigate = (updates: Partial<RouterState>, addToHistory = true) => {

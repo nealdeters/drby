@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, PanResponder, Animated } from 'react-native';
 import { Racer, RaceEvent } from '../gameTypes';
 import { theme } from '../theme';
+import { RaceResultsDrawer } from './RaceResultsDrawer';
 
 type DrawerMode = 'list' | 'results';
 
@@ -11,6 +12,7 @@ interface RacerRacesDrawerProps {
   roster: Racer[];
   races: RaceEvent[];
   onClose: () => void;
+  onRacerClick?: (racerId: string) => void;
 }
 
 export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
@@ -19,6 +21,7 @@ export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
   roster,
   races,
   onClose,
+  onRacerClick,
 }) => {
   const [mode, setMode] = useState<DrawerMode>('list');
   const [selectedRace, setSelectedRace] = useState<RaceEvent | null>(null);
@@ -102,6 +105,29 @@ export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
   const sortedRaces = [...races]
     .filter(race => race.results && race.results.length > 0)
     .sort((a, b) => b.startTime - a.startTime);
+
+  // In results mode, just render RaceResultsDrawer directly
+  if (mode === 'results' && selectedRace) {
+    return (
+      <RaceResultsDrawer
+        visible={visible}
+        results={selectedRace.results?.map((resultRacerId, index) => {
+          const resultRacer = roster.find(r => r.id === resultRacerId);
+          if (!resultRacer) return null;
+          return {
+            ...resultRacer,
+            finishTime: selectedRace.finishTimes?.[resultRacerId],
+            lane: index + 1,
+          };
+        }).filter(Boolean) as Racer[] || []}
+        trackName={selectedRace.track?.name}
+        onClose={handleBack}
+        onRacerClick={onRacerClick}
+      />
+    );
+  }
+
+  if (!visible) return null;
 
   return (
     <Animated.View
@@ -210,100 +236,26 @@ export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
             );
           })}
         </ScrollView>
-      ) : (
-        <ScrollView 
-          style={{ maxHeight: 400 }} 
-          showsVerticalScrollIndicator={false}
-          onScroll={(e) => { scrollOffsetY.current = e.nativeEvent.contentOffset.y; }}
-          scrollEventThrottle={16}
-        >
-          {selectedRace?.results?.map((resultRacerId, index) => {
-            const resultRacer = roster.find(r => r.id === resultRacerId);
-            const finishTime = selectedRace.finishTimes?.[resultRacerId];
-            if (!resultRacer) return null;
-            
-            return (
-              <View
-                key={resultRacerId}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingHorizontal: 20,
-                  paddingVertical: 12,
-                  marginHorizontal: 16,
-                  marginBottom: 8,
-                  backgroundColor: theme.surface.elevated,
-                  borderRadius: 12,
-                }}
-              >
-                <View style={{ width: 40, alignItems: 'center' }}>
-                  {index < 3 ? (
-                    <Text style={{ fontSize: 24 }}>{getPositionEmoji(index + 1)}</Text>
-                  ) : (
-                    <Text style={{ fontSize: 18, fontWeight: '700', color: getPositionColor(index + 1) }}>
-                      {index + 1}
-                    </Text>
-                  )}
-                </View>
+      ) : null}
 
-                <View
-                  style={{
-                    width: 4,
-                    height: 40,
-                    backgroundColor: resultRacer.color,
-                    borderRadius: 2,
-                    marginRight: 12,
-                  }}
-                />
-
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text.primary }}>
-                    {resultRacer.name}
-                  </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 12, color: theme.text.muted }}>
-                      Lane {resultRacer.lane || index + 1}
-                    </Text>
-                    {finishTime && (
-                      <Text style={{ fontSize: 12, color: theme.primary[300], fontWeight: '600', marginLeft: 8 }}>
-                        {formatTime(finishTime)}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-
-                {resultRacer.status === 'injured' && (
-                  <View style={{ 
-                    backgroundColor: '#EF4444', 
-                    paddingHorizontal: 8, 
-                    paddingVertical: 2, 
-                    borderRadius: 8,
-                  }}>
-                    <Text style={{ fontSize: 10, color: '#fff', fontWeight: '600' }}>INJURED</Text>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </ScrollView>
+      {/* Close button - only show in list mode */}
+      {mode === 'list' && (
+        <View style={{ padding: 20 }}>
+          <TouchableOpacity
+            onPress={onClose}
+            style={{
+              backgroundColor: theme.surface.dark,
+              paddingVertical: 14,
+              borderRadius: 12,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ color: theme.text.primary, fontWeight: '700', fontSize: 16 }}>
+              Close
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
-
-      {/* Close button */}
-      <View style={{ padding: 20 }}>
-        <TouchableOpacity
-          onPress={onClose}
-          style={{
-            backgroundColor: theme.surface.dark,
-            paddingVertical: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: theme.text.primary, fontWeight: '700', fontSize: 16 }}>
-            Close
-          </Text>
-        </TouchableOpacity>
-      </View>
     </Animated.View>
   );
 };

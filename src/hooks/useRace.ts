@@ -91,19 +91,20 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
 
       console.log(`📡 Subscribing to race: ${raceId}`);
 
-      // Subscribe to race updates
       channel.subscribe('race-update', (message: any) => {
         const update = message.data as RaceUpdate;
         const now = Date.now();
         
-        // Validate race update to prevent stale or invalid data
+        console.log('📨 Received race-update:', update.type, 'raceId:', update.raceId, 'currentId:', raceId, 'timestamp:', update.timestamp, 'age:', now - update.timestamp, 'ms');
+        
+        // Validate race update to prevent stale data
         if (!validateRaceUpdate(update, raceId)) {
           console.warn(`Invalid race update rejected for race ${raceId}:`, update);
           return;
         }
         
         if (update.type === 'started') {
-          console.log('🚀 Race started');
+          console.log('🚀 Race started - setting isRacing=true, racers:', update.racers?.map(r => r.name));
           setIsRacing(true);
           if (update.racers) {
             racersRef.current = update.racers;
@@ -111,6 +112,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
             lastStateUpdate.current = now;
           }
         } else if (update.type === 'progress') {
+          console.log('📊 Progress update:', update.progressMap);
           if (update.progressMap) {
             // Update shared values for smooth animation
             Object.entries(update.progressMap).forEach(([racerId, progress]) => {
@@ -205,6 +207,11 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
   const stopRace = useCallback(() => {
     console.log('Race will finish automatically via server');
   }, []);
+
+  // Debug: log when isRacing changes
+  useEffect(() => {
+    console.log('🔍 useRace state change: isRacing=', isRacing, 'racers.length=', racers.length, 'racers:', racers.map(r => `${r.name}:${r.status}`));
+  }, [isRacing, racers]);
 
   return { racers, isRacing, startRace, stopRace, progressMap };
 };
