@@ -48,8 +48,49 @@ export const handler: Handler = async (event: HandlerEvent) => {
     return { statusCode: 500, body: JSON.stringify({ error: "Ably API key not configured" }) };
   }
 
-  if (event.httpMethod !== 'POST') {
+  if (event.httpMethod !== 'POST' && event.httpMethod !== 'GET') {
     return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+  }
+
+  // Handle GET request to check race status or list active races
+  if (event.httpMethod === 'GET') {
+    const params = event.queryStringParameters || {};
+    const action = params.action;
+    const raceIdParam = params.raceId;
+    
+    if (action === 'status') {
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          activeRaces: Array.from(activeRaces.keys()),
+          count: activeRaces.size 
+        }),
+      };
+    }
+    
+    if (action === 'clear' && raceIdParam) {
+      if (activeRaces.has(raceIdParam)) {
+        clearInterval(activeRaces.get(raceIdParam));
+        activeRaces.delete(raceIdParam);
+        return {
+          statusCode: 200,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: `Cleared race ${raceIdParam}` }),
+        };
+      }
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: `Race ${raceIdParam} not found in active races` }),
+      };
+    }
+    
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activeRaces: Array.from(activeRaces.keys()) }),
+    };
   }
 
   const body = JSON.parse(event.body || '{}');
@@ -79,14 +120,19 @@ export const handler: Handler = async (event: HandlerEvent) => {
   // Initialize race state
   const raceRacers: Racer[] = racers.map((r: any, index: number) => ({
     ...r,
-    strategy: r.strategy || 'balanced', // Default to balanced if not specified
+    strategy: r.strategy || 'balanced',
     health: r.health || 100,
     progress: 0,
     laps: 0,
     totalDistance: 0,
     status: 'active' as const,
-    lane: Math.min(index + 1, 8), // Lane 1-N (1-based indexing), max 8 lanes
-    position: index + 1, // Initial position
+    lane: Math.min(index + 1, 8),
+    position: index + 1,
+    // Default values for new attributes if not present
+    acceleration: r.acceleration ?? 50,
+    endurance: r.endurance ?? 50,
+    consistency: r.consistency ?? 50,
+    staminaRecovery: r.staminaRecovery ?? 50,
   }));
 
   const totalDistance = track.length * track.laps;
@@ -96,17 +142,29 @@ export const handler: Handler = async (event: HandlerEvent) => {
   console.log(`🏁 Race debug: track.length=${track.length}, track.laps=${track.laps}, totalDistance=${totalDistance}`);
   console.log(`🏁 Race debug: racers[0].baseSpeed=${racers[0]?.baseSpeed}, racers[0].name=${racers[0]?.name}, raceId=${raceId}`);
 
-  // Publish race started
-  await channel.publish('race-update', {
-    type: 'started',
-    raceId,
-    timestamp: startTime,
-    racers: raceRacers,
-    progressMap: raceRacers.reduce((acc: Record<string, number>, r: Racer) => {
-      acc[r.id] = 0;
-      return acc;
-    }, {}),
-  } as RaceUpdate);
+  // Publish race started with error handling
+  try {
+    await channel.publish('race-update', {
+      type: 'started',
+      raceId,
+      timestamp: startTime,
+      racers: raceRacers,
+      progressMap: raceRacers.reduce((acc: Record<string, number>, r: Racer) => {
+        acc[r.id] = 0;
+        return acc;
+      }, {}),
+    } as RaceUpdate);
+    console.log(`✅ Published race started message for ${raceId}`);
+  } catch (publishErr) {
+    console.error(`❌ Failed to publish race started message:`, publishErr);
+    // Clean up and return error
+    activeRaces.delete(raceId);
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Failed to start race: " + (publishErr as Error).message }),
+    };
+  }
 
   console.log(`🏁 Starting race ${raceId} with ${racers.length} racers, totalDistance=${totalDistance}m`);
 
