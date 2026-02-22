@@ -139,6 +139,12 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const updateInterval = 20; // 20ms tick for smoother simulation (50 updates/sec)
   const startTime = Date.now();
 
+  // Create a promise that resolves when the race finishes
+  let raceResolve: (value: { message: string; raceId: string; channel: string }) => void;
+  const racePromise = new Promise<{ message: string; raceId: string; channel: string }>((resolve) => {
+    raceResolve = resolve;
+  });
+
   console.log(`🏁 Race debug: track.length=${track.length}, track.laps=${track.laps}, totalDistance=${totalDistance}`);
   console.log(`🏁 Race debug: racers[0].baseSpeed=${racers[0]?.baseSpeed}, racers[0].name=${racers[0]?.name}, raceId=${raceId}`);
 
@@ -401,10 +407,14 @@ export const handler: Handler = async (event: HandlerEvent) => {
       } catch (err) {
         console.error('Failed to save race results:', err);
       }
+
+      // Resolve the promise to return response
+      raceResolve!({ message: 'Race finished', raceId, channel: `race:${raceId}` });
+      return;
     }
-    } catch (err) {
-      console.error(`🏁 Race loop error for ${raceId}:`, err);
-    }
+  } catch (err) {
+    console.error(`🏁 Race loop error for ${raceId}:`, err);
+  }
   }, updateInterval);
 
   // Store the interval reference
@@ -449,17 +459,24 @@ export const handler: Handler = async (event: HandlerEvent) => {
       } catch (err) {
         console.error('Failed to save timeout race results:', err);
       }
+
+      // Resolve the promise for timeout case
+      raceResolve!({ message: 'Race timed out', raceId, channel: `race:${raceId}` });
     }
   }, 5 * 60 * 1000);
 
-  // Return immediately - race continues in background
+  // Wait for race to complete before returning (keeps function alive in serverless)
+  const result = await racePromise;
+
+  const responseHeaders: Record<string, string | number> = {
+    "Content-Type": "application/json",
+  };
+  // Extend timeout to max 26 seconds on Netlify
+  (responseHeaders as any)["x-nf-max-duration"] = "26";
+
   return {
     statusCode: 200,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ 
-      message: "Race started",
-      raceId,
-      channel: `race:${raceId}`,
-    }),
+    headers: responseHeaders,
+    body: JSON.stringify(result),
   };
 };
