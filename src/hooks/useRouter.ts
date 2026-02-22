@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export type ViewState = 
   | 'race' 
@@ -25,6 +25,10 @@ export const useRouter = () => {
     selectedHistoricalSeason: null,
     selectedHistoricalRacerId: null,
   });
+  
+  const [history, setHistory] = useState<RouterState[]>([]);
+  const [forwardStack, setForwardStack] = useState<RouterState[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Skip URL updates until initialized
   useEffect(() => {
@@ -97,25 +101,47 @@ export const useRouter = () => {
     setInitialized(true);
   }, []);
 
-  const navigate = (updates: Partial<RouterState>) => {
+  const navigate = (updates: Partial<RouterState>, addToHistory = true) => {
+    if (addToHistory) {
+      setHistory(prev => [...prev, state]);
+      setForwardStack([]); // Clear forward stack on new navigation
+    }
     setState(prev => ({ ...prev, ...updates }));
   };
 
   const goBack = () => {
-    if (state.selectedHistoricalRacerId) {
-      navigate({ selectedHistoricalRacerId: null, view: 'historical-standings' });
-    } else if (state.selectedHistoricalSeason) {
-      navigate({ selectedHistoricalSeason: null, view: 'seasons' });
-    } else if (state.selectedRacerId) {
-      navigate({ selectedRacerId: null, view: 'standings' });
-    } else {
-      navigate({ view: 'race' });
-    }
+    if (history.length === 0) return;
+    
+    const previous = history[history.length - 1];
+    setForwardStack(prev => [...prev, state]);
+    setHistory(prev => prev.slice(0, -1));
+    setState(previous);
   };
+
+  const goForward = () => {
+    if (forwardStack.length === 0) return;
+    
+    const next = forwardStack[forwardStack.length - 1];
+    setHistory(prev => [...prev, state]);
+    setForwardStack(prev => prev.slice(0, -1));
+    setState(next);
+  };
+
+  const refresh = useCallback(() => {
+    setRefreshKey(prev => prev + 1);
+  }, []);
+
+  const canGoBack = history.length > 0;
+  const canGoForward = forwardStack.length > 0;
 
   return {
     ...state,
     navigate,
     goBack,
+    goForward,
+    refresh,
+    canGoBack,
+    canGoForward,
+    refreshKey,
   };
 };

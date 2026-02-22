@@ -47,13 +47,20 @@ export const useSeason = () => {
   const [completedSeasons, setCompletedSeasons] = useState<CompletedSeason[]>([]);
   const [currentSeasonNumber, setCurrentSeasonNumber] = useState(1);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [initialRosterLoaded, setInitialRosterLoaded] = useState(false);
 
   // Initialize Season / Schedule
   useEffect(() => {
     const initData = async () => {
       try {
-        const [fetchedRacers, fetchedTracks, savedSchedule, savedStandings, savedSeasons, savedSeasonNum] = await Promise.all([
-          racersService.getAll(),
+        // Try to load roster from races service first (has health/stats)
+        // Fall back to racers service if no saved roster
+        let fetchedRacers = await racesService.getRoster().catch(() => null);
+        if (!fetchedRacers || fetchedRacers.length === 0) {
+          fetchedRacers = await racersService.getAll();
+        }
+        
+        const [fetchedTracks, savedSchedule, savedStandings, savedSeasons, savedSeasonNum] = await Promise.all([
           tracksService.getAll(),
           racesService.getSeasonSchedule().catch(() => null),
           racesService.getStandings().catch(() => null),
@@ -126,6 +133,7 @@ export const useSeason = () => {
         console.error("Failed to initialize season data", error);
       } finally {
         setLoading(false);
+        setInitialRosterLoaded(true);
       }
     };
 
@@ -149,6 +157,15 @@ export const useSeason = () => {
       );
     }
   }, [standings]);
+
+  // Save roster to Blobs whenever it changes (after initial load)
+  useEffect(() => {
+    if (initialRosterLoaded && roster.length > 0) {
+      racesService.saveRoster(roster).catch(err => 
+        console.error('Failed to save roster:', err)
+      );
+    }
+  }, [roster, initialRosterLoaded]);
 
   const generateSchedule = async (currentRoster: Racer[], currentTracks: Track[], seasonNum: number = currentSeasonNumber) => {
     const newSchedule: RaceEvent[] = [];

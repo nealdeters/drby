@@ -5,6 +5,7 @@ const SCHEDULE_KEY = 'season-schedule';
 const STANDINGS_KEY = 'season-standings';
 const COMPLETED_SEASONS_KEY = 'completed-seasons';
 const SEASON_NUMBER_KEY = 'current-season-number';
+const ROSTER_KEY = 'roster';
 
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.headers["x-api-key"] !== process.env.API_KEY) {
@@ -26,6 +27,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const isStandingsRequest = segments.length > 3 && segments[segments.length - 1] === 'standings';
   const isCompletedSeasonsRequest = segments.length > 3 && segments[segments.length - 1] === 'completed-seasons';
   const isSeasonNumberRequest = segments.length > 3 && segments[segments.length - 1] === 'season-number';
+  const isRosterRequest = segments.length > 3 && segments[segments.length - 1] === 'roster';
 
   try {
     const method = event.httpMethod;
@@ -101,6 +103,31 @@ export const handler: Handler = async (event: HandlerEvent) => {
         const body = event.body || '{}';
         const { number } = JSON.parse(body);
         await store.set(SEASON_NUMBER_KEY, JSON.stringify(number || 1));
+        return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true }) };
+      }
+      
+      return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+    }
+
+    // Handle roster endpoint (for persisting racer health and stats)
+    if (isRosterRequest) {
+      if (method === 'GET') {
+        try {
+          const data = await store.get(ROSTER_KEY);
+          return { 
+            statusCode: 200, 
+            headers: { "Content-Type": "application/json" }, 
+            body: String(data || '[]') 
+          };
+        } catch {
+          return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: '[]' };
+        }
+      }
+      
+      if (method === 'POST') {
+        const body = event.body || '{}';
+        const { roster } = JSON.parse(body);
+        await store.set(ROSTER_KEY, JSON.stringify(roster || []));
         return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true }) };
       }
       

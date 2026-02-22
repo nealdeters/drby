@@ -1,7 +1,7 @@
 import './polyfills';
 import './index.css';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, FlatList, Text, SafeAreaView, TouchableOpacity, StatusBar, Dimensions, ScrollView } from 'react-native';
+import { View, FlatList, Text, SafeAreaView, TouchableOpacity, StatusBar, Dimensions, ScrollView, PanResponder } from 'react-native';
 import { RaceTrack } from './components/RaceTrack';
 import { useRace } from './hooks/useRace';
 import { useSeason, CompletedSeason } from './hooks/useSeason';
@@ -43,7 +43,7 @@ const useIsMobile = () => {
 };
 
 export default function App() {
-  const { view, selectedRacerId, selectedHistoricalSeason, selectedHistoricalRacerId, navigate, goBack } = useRouter();
+  const { view, selectedRacerId, selectedHistoricalSeason, selectedHistoricalRacerId, navigate, goBack, goForward, refresh, canGoBack, canGoForward } = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeRaceId, setActiveRaceId] = useState<string>(''); // Track active test race
   const [testRaceRacers, setTestRaceRacers] = useState<Racer[]>([]); // Racers for test race
@@ -106,6 +106,7 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [showNextRaceCountdown, setShowNextRaceCountdown] = useState(false);
   const raceStartTriggered = useRef(false);
+  const raceStartTimeout = useRef<NodeJS.Timeout | null>(null);
   const currentRaceId = useRef<string | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
@@ -116,6 +117,23 @@ export default function App() {
       countdownIntervalRef.current = null;
     }
   }, []);
+
+  // Safety: reset trigger flag if race doesn't start within 30 seconds
+  const resetRaceTrigger = useCallback(() => {
+    raceStartTriggered.current = false;
+    if (raceStartTimeout.current) {
+      clearTimeout(raceStartTimeout.current);
+      raceStartTimeout.current = null;
+    }
+  }, []);
+  
+  // Clear safety timeout when race actually starts
+  useEffect(() => {
+    if (isRacing && raceStartTimeout.current) {
+      clearTimeout(raceStartTimeout.current);
+      raceStartTimeout.current = null;
+    }
+  }, [isRacing]);
   
   // Reset trigger flag when race state changes
   useEffect(() => {
@@ -165,6 +183,11 @@ export default function App() {
       }
       
       console.log('✅ Race triggered successfully:', race.id);
+      // Clear the safety timeout since request succeeded
+      if (raceStartTimeout.current) {
+        clearTimeout(raceStartTimeout.current);
+        raceStartTimeout.current = null;
+      }
     } catch (err) {
       console.error('❌ Failed to start race:', err);
       
@@ -175,11 +198,11 @@ export default function App() {
         setTimeout(() => triggerRaceWithRetry(race, racers, retryCount + 1), delay);
       } else {
         // Reset trigger flag on final failure
-        raceStartTriggered.current = false;
+        resetRaceTrigger();
         console.log('❌ Race trigger failed after 3 retries, giving up');
       }
     }
-  }, [API_URL, headers]);
+  }, [API_URL, headers, resetRaceTrigger]);
 
   // Debug: Start a test race with random racers and track
   const startTestRace = useCallback(async () => {
@@ -268,10 +291,12 @@ export default function App() {
       // Only trigger race start if not already triggered and not racing
       if (!raceStartTriggered.current && !isRacing) {
         raceStartTriggered.current = true;
+        // Set safety timeout to reset flag if race doesn't start
+        raceStartTimeout.current = setTimeout(resetRaceTrigger, 30000);
         console.log('🚀 Triggering overdue race:', upcomingRace.id, 'with racers:', currentRaceRacers.map(r => r.id));
         if (currentRaceRacers.length === 0) {
           console.error('❌ Cannot start race - no valid racers found');
-          raceStartTriggered.current = false;
+          resetRaceTrigger();
           return;
         }
         triggerRaceWithRetry(upcomingRace, currentRaceRacers);
@@ -284,12 +309,14 @@ export default function App() {
       const diff = upcomingRace.startTime - Date.now();
       if (diff <= 0 && !raceStartTriggered.current) {
         raceStartTriggered.current = true;
+        // Set safety timeout to reset flag if race doesn't start
+        raceStartTimeout.current = setTimeout(resetRaceTrigger, 30000);
         setTimeLeft(0);
         setShowNextRaceCountdown(false);
         console.log('🚀 Triggering scheduled race:', upcomingRace.id, 'with racers:', currentRaceRacers.map(r => r.id));
         if (currentRaceRacers.length === 0) {
           console.error('❌ Cannot start race - no valid racers found');
-          raceStartTriggered.current = false;
+          resetRaceTrigger();
           return;
         }
         triggerRaceWithRetry(upcomingRace, currentRaceRacers);
@@ -309,7 +336,7 @@ export default function App() {
     return () => {
       clearCountdownInterval();
     };
-  }, [nextRace, getNextUpcomingRace, isRacing, currentRaceRacers, clearCountdownInterval]);
+  }, [nextRace, getNextUpcomingRace, isRacing, currentRaceRacers, clearCountdownInterval, resetRaceTrigger, triggerRaceWithRetry]);
 
   const formatRaceTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
@@ -326,8 +353,29 @@ export default function App() {
     navigate({ selectedRacerId: racerId, view: 'profile' });
   };
 
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return Math.abs(gestureState.dx) > 20 || Math.abs(gestureState.dy) > 20;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const SWIPE_THRESHOLD = 50;
+          
+          if (gestureState.dy > SWIPE_THRESHOLD && Math.abs(gestureState.dx) < SWIPE_THRESHOLD * 2) {
+            refresh();
+          } else if (gestureState.dx > SWIPE_THRESHOLD && Math.abs(gestureState.dy) < SWIPE_THRESHOLD * 2) {
+            if (canGoBack) goBack();
+          } else if (gestureState.dx < -SWIPE_THRESHOLD && Math.abs(gestureState.dy) < SWIPE_THRESHOLD * 2) {
+            if (canGoForward) goForward();
+          }
+        },
+      }),
+    [canGoBack, canGoForward, goBack, goForward, refresh]
+  );
+
   return (
-    <SafeAreaView className="flex-1" style={{ flex: 1, backgroundColor: theme.surface.page }}>
+    <SafeAreaView {...panResponder.panHandlers} className="flex-1" style={{ flex: 1, backgroundColor: theme.surface.page }}>
       <StatusBar barStyle="light-content" />
       
       {/* Header / Nav */}
@@ -371,7 +419,7 @@ export default function App() {
 
       {view === 'race' && (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
-           <View className="p-2 items-center" style={{ padding: 8, alignItems: 'center' }}>
+            <View className="p-2 items-center" style={{ padding: 8, alignItems: 'center' }}>
               <Text className="text-xs font-bold uppercase tracking-widest" style={{ color: theme.text.secondary, fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 2 }}>
                {nextRace ? `Next: ${nextRace.track?.name || 'Loading...'} (${nextRace.track?.length || 0}m x ${nextRace.track?.laps || 0} laps)` : 'Season Finished'}
              </Text>
@@ -408,7 +456,13 @@ export default function App() {
 
           <FlatList
             data={racers.sort((a, b) => {
-              // Sort by total distance (most advanced first)
+              // Finished racers stay at top in their finish order
+              if (a.status === 'finished' && b.status !== 'finished') return -1;
+              if (a.status !== 'finished' && b.status === 'finished') return 1;
+              // Injured racers drop to the bottom
+              if (a.status === 'injured' && b.status !== 'injured') return 1;
+              if (a.status !== 'injured' && b.status === 'injured') return -1;
+              // Among same status, sort by total distance (most advanced first)
               if (a.totalDistance !== b.totalDistance) {
                 return b.totalDistance - a.totalDistance;
               }

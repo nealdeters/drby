@@ -113,5 +113,20 @@ export const racesService = {
       body: JSON.stringify({ number }),
     });
     if (!response.ok) throw new Error('Failed to save season number');
+  },
+
+  async getRoster(): Promise<any[]> {
+    const response = await fetch(`${API_URL}/races/roster`, { headers });
+    if (!response.ok) throw new Error('Failed to fetch roster');
+    return response.json();
+  },
+
+  async saveRoster(roster: any[]): Promise<void> {
+    const response = await fetch(`${API_URL}/races/roster`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ roster }),
+    });
+    if (!response.ok) throw new Error('Failed to save roster');
   }
 };

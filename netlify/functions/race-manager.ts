@@ -85,7 +85,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   }));
 
   const totalDistance = track.length * track.laps;
-  const updateInterval = 100; // 100ms = 10 updates/sec (keeps under Ably rate limit)
+  const updateInterval = 20; // 20ms tick for smoother simulation (50 updates/sec)
   const startTime = Date.now();
 
   console.log(`🏁 Race debug: track.length=${track.length}, track.laps=${track.laps}, totalDistance=${totalDistance}`);
@@ -156,9 +156,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
       // Balanced: moderate decay - steady throughout
       // Conservative: slowest decay - maintains energy
       const healthDecayRates = {
-        aggressive: 0.012,    // ~0.36 health per second (fastest burn)
-        balanced: 0.006,      // ~0.18 health per second (moderate)
-        conservative: 0.003  // ~0.09 health per second (slowest burn)
+        aggressive: 0.025,    // ~0.75 health per second (fastest burn)
+        balanced: 0.012,      // ~0.36 health per second (moderate)
+        conservative: 0.006  // ~0.18 health per second (slowest burn)
       };
       const decayRate = healthDecayRates[racer.strategy] || healthDecayRates.balanced;
       racer.health = Math.max(0, (racer.health || 100) - decayRate);

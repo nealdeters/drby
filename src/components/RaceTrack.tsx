@@ -121,7 +121,7 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
 
   return (
     <View 
-      className="flex-1 items-center justify-center bg-[#4A895C] rounded-3xl m-2 overflow-hidden"
+      className="flex-1 items-center justify-center rounded-3xl m-2 overflow-hidden"
       style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#4A895C', borderRadius: 24, margin: 8, overflow: 'hidden' }}
     >
       <Svg height={TRACK_HEIGHT} width={TRACK_WIDTH} viewBox={`0 0 ${TRACK_WIDTH} ${TRACK_HEIGHT}`}>
