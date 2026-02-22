@@ -18,6 +18,8 @@ import { RacerProfile } from './components/RacerProfile';
 import { HamburgerMenu } from './components/HamburgerMenu';
 import { SeasonsList } from './components/SeasonsList';
 import { ScheduleList } from './components/ScheduleList';
+import { Toast } from './components/Toast';
+import { RaceResultsDrawer } from './components/RaceResultsDrawer';
 import { theme } from './theme';
 
 const LOADING_TRACK: Track = { id: '0', name: 'Loading', surface: 'asphalt', length: 1000, laps: 3 };
@@ -75,6 +77,10 @@ export default function App() {
 
   // Fix: Memoize callback to prevent unnecessary updates
   const handleRaceFinish = useCallback((results: Racer[]) => {
+    // Show results drawer
+    setRaceResults(results);
+    setShowResultsDrawer(true);
+    
     // Skip completing test races - they don't affect standings or schedule
     if (activeRaceId.startsWith('test-')) {
       console.log('🧪 Test race finished, skipping completion');
@@ -102,9 +108,35 @@ export default function App() {
     onRaceFinish: handleRaceFinish
   });
 
+  // Detect injuries during race and show toast
+  useEffect(() => {
+    if (!isRacing) return;
+    
+    racers.forEach(racer => {
+      const prevStatus = previousRacerStatuses.current[racer.id];
+      if (prevStatus === 'active' && racer.status === 'injured') {
+        setToastMessage(`🏥 ${racer.name} got injured!`);
+        setToastVisible(true);
+      }
+      previousRacerStatuses.current[racer.id] = racer.status;
+    });
+  }, [racers, isRacing]);
+
   // Countdown Timer & Race Trigger
   const [timeLeft, setTimeLeft] = useState(0);
   const [showNextRaceCountdown, setShowNextRaceCountdown] = useState(false);
+  
+  // Toast state for notifications
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  
+  // Race results drawer state
+  const [showResultsDrawer, setShowResultsDrawer] = useState(false);
+  const [raceResults, setRaceResults] = useState<Racer[]>([]);
+  
+  // Track previous racer statuses for injury detection
+  const previousRacerStatuses = useRef<Record<string, string>>({});
+  
   const raceStartTriggered = useRef(false);
   const raceStartTimeout = useRef<NodeJS.Timeout | null>(null);
   const currentRaceId = useRef<string | null>(null);
@@ -900,6 +932,22 @@ export default function App() {
           </View>
         </View>
       )}
+
+      {/* Toast notifications */}
+      <Toast 
+        message={toastMessage} 
+        visible={toastVisible} 
+        onHide={() => setToastVisible(false)}
+        type="warning"
+      />
+
+      {/* Race Results Drawer */}
+      <RaceResultsDrawer
+        visible={showResultsDrawer}
+        results={raceResults}
+        trackName={nextRace?.track?.name}
+        onClose={() => setShowResultsDrawer(false)}
+      />
     </SafeAreaView>
   );
 }
