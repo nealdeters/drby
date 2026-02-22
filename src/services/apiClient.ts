@@ -31,8 +31,11 @@ export const headers = {
 let ablyClient: Ably.Realtime | null = null;
 
 export const getAblyClient = () => {
-  if (!ablyClient && process.env.VITE_ABLY_API_KEY) {
-    ablyClient = new Ably.Realtime(process.env.VITE_ABLY_API_KEY);
+  const ablyKey = import.meta.env.VITE_ABLY_API_KEY as string | undefined;
+  console.log('[Ably] Checking for API key, found:', ablyKey ? 'yes' : 'no');
+  if (!ablyClient && ablyKey) {
+    ablyClient = new Ably.Realtime(ablyKey);
+    console.log('[Ably] Client initialized');
   }
   return ablyClient;
 };
