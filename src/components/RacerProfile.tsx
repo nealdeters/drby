@@ -3,17 +3,49 @@ import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { Racer, RaceEvent } from '../gameTypes';
 import { theme, getHealthColor } from '../theme';
 import { getRacerTrackAverages, TrackAverage } from '../utils/stats';
+import { CompletedSeason, RacerSeasonStats } from '../hooks/useSeason';
 
 interface RacerProfileProps {
   stats: Racer & { first: number; second: number; third: number; racesRun: number };
   currentSeasonPoints: number;
   currentSeasonNumber: number;
   schedule: RaceEvent[];
+  completedSeasons: CompletedSeason[];
+  roster?: Racer[];
   onBack: () => void;
   onOpenRacesDrawer?: () => void;
+  onSeasonRacesClick?: (seasonNumber: number) => void;
+  onTrackClick?: (trackId: string) => void;
 }
 
-export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, schedule, onBack, onOpenRacesDrawer }: RacerProfileProps) => {
+export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, schedule, completedSeasons, roster = [], onBack, onOpenRacesDrawer, onSeasonRacesClick, onTrackClick }: RacerProfileProps) => {
+  // Calculate career totals from all completed seasons + current season
+  const careerTotals = useMemo(() => {
+    let totalFirst = 0, totalSecond = 0, totalThird = 0, totalRaces = 0;
+    
+    // Current season
+    const currentFirst = schedule.filter(r => r.completed && r.results?.[0] === stats.id).length;
+    const currentSecond = schedule.filter(r => r.completed && r.results?.[1] === stats.id).length;
+    const currentThird = schedule.filter(r => r.completed && r.results?.[2] === stats.id).length;
+    const currentRaces = schedule.filter(r => r.completed && r.results?.includes(stats.id)).length;
+    totalFirst += currentFirst;
+    totalSecond += currentSecond;
+    totalThird += currentThird;
+    totalRaces += currentRaces;
+    
+    // Completed seasons
+    completedSeasons.forEach(season => {
+      const seasonStat = season.racerStats?.find(s => s.id === stats.id);
+      if (seasonStat) {
+        totalFirst += seasonStat.first;
+        totalSecond += seasonStat.second;
+        totalThird += seasonStat.third;
+        totalRaces += seasonStat.racesRun;
+      }
+    });
+    return { first: totalFirst, second: totalSecond, third: totalThird, racesRun: totalRaces };
+  }, [completedSeasons, schedule, stats.id]);
+  
   if (!stats) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -63,6 +95,7 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
         </View>
       </View>
 
+      {/* Career Performance - moved to top */}
       <View style={{ 
         backgroundColor: theme.surface.card, 
         padding: 20, 
@@ -76,61 +109,205 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
           textTransform: 'uppercase', 
           marginBottom: 16, 
           letterSpacing: 1,
-        }}>Season {currentSeasonNumber} Stats</Text>
-        <View style={{ 
-          flexDirection: 'row', 
-          backgroundColor: theme.surface.elevated,
-          borderRadius: 16,
-          padding: 20,
-          justifyContent: 'space-between',
-        }}>
-          <View style={{ alignItems: 'center', flex: 1 }}>
+        }}>Career Performance</Text>
+        
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <View style={{ 
+            alignItems: 'center', 
+            backgroundColor: theme.surface.elevated, 
+            padding: 16, 
+            borderRadius: 16, 
+            width: '30%',
+          }}>
+            <Text style={{ fontSize: 20, marginBottom: 4 }}>🥇</Text>
             <Text style={{ 
               color: theme.text.primary, 
-              fontSize: 24, 
+              fontSize: 28, 
               fontWeight: '900',
-            }}>{currentSeasonPoints}</Text>
+            }}>{careerTotals.first}</Text>
             <Text style={{ 
               color: theme.text.muted, 
               fontSize: 10, 
               fontWeight: 'bold', 
               textTransform: 'uppercase',
-              marginTop: 4,
-            }}>Points</Text>
+            }}>1st</Text>
           </View>
-          <View style={{ width: 1, backgroundColor: theme.primary[400] }} />
-          <View style={{ alignItems: 'center', flex: 1 }}>
+          
+          <View style={{ 
+            alignItems: 'center', 
+            backgroundColor: theme.surface.elevated, 
+            padding: 16, 
+            borderRadius: 16, 
+            width: '30%',
+          }}>
+            <Text style={{ fontSize: 20, marginBottom: 4 }}>🥈</Text>
             <Text style={{ 
               color: theme.text.primary, 
-              fontSize: 24, 
+              fontSize: 28, 
               fontWeight: '900',
-            }}>{stats.first}</Text>
+            }}>{careerTotals.second}</Text>
             <Text style={{ 
               color: theme.text.muted, 
               fontSize: 10, 
               fontWeight: 'bold', 
               textTransform: 'uppercase',
-              marginTop: 4,
-            }}>Wins</Text>
+            }}>2nd</Text>
           </View>
-          <View style={{ width: 1, backgroundColor: theme.primary[400] }} />
-          <TouchableOpacity style={{ alignItems: 'center', flex: 1 }} onPress={() => onOpenRacesDrawer?.()}>
+          
+          <View style={{ 
+            alignItems: 'center', 
+            backgroundColor: theme.surface.elevated, 
+            padding: 16, 
+            borderRadius: 16, 
+            width: '30%',
+          }}>
+            <Text style={{ fontSize: 20, marginBottom: 4 }}>🥉</Text>
             <Text style={{ 
               color: theme.text.primary, 
-              fontSize: 24, 
+              fontSize: 28, 
               fontWeight: '900',
-            }}>{stats.racesRun}</Text>
+            }}>{careerTotals.third}</Text>
             <Text style={{ 
-              color: theme.text.muted, 
+              color: theme.text.tertiary, 
               fontSize: 10, 
               fontWeight: 'bold', 
               textTransform: 'uppercase',
-              marginTop: 4,
-            }}>Races</Text>
-          </TouchableOpacity>
+            }}>3rd</Text>
+          </View>
         </View>
       </View>
 
+      {/* Season History Card */}
+      {(() => {
+        // Build list of all seasons with this racer's stats
+        const allSeasonStats: { seasonNumber: number; position: number; points: number; first: number; second: number; third: number; races: number; isCurrent: boolean }[] = [];
+        
+        // Add current season
+        if (schedule.length > 0) {
+          const racesRun = schedule.filter(r => r.completed && r.results?.includes(stats.id)).length;
+          const wins = schedule.filter(r => r.completed && r.results?.[0] === stats.id).length;
+          const seconds = schedule.filter(r => r.completed && r.results?.[1] === stats.id).length;
+          const thirds = schedule.filter(r => r.completed && r.results?.[2] === stats.id).length;
+          
+          // Calculate current season position
+          const currentStandings: { id: string; points: number }[] = [];
+          roster.forEach((r: any) => {
+            const rWins = schedule.filter(ev => ev.completed && ev.results?.[0] === r.id).length;
+            const rSeconds = schedule.filter(ev => ev.completed && ev.results?.[1] === r.id).length;
+            const rThirds = schedule.filter(ev => ev.completed && ev.results?.[2] === r.id).length;
+            const points = rWins * 5 + rSeconds * 3 + rThirds;
+            currentStandings.push({ id: r.id, points });
+          });
+          currentStandings.sort((a, b) => b.points - a.points);
+          const position = currentStandings.findIndex(s => s.id === stats.id) + 1;
+          
+          const seasonPoints = currentStandings.find(s => s.id === stats.id)?.points || 0;
+          
+          allSeasonStats.push({
+            seasonNumber: currentSeasonNumber,
+            position,
+            points: seasonPoints,
+            first: wins,
+            second: seconds,
+            third: thirds,
+            races: racesRun,
+            isCurrent: true
+          });
+        }
+        
+        // Add completed seasons
+        completedSeasons.forEach(season => {
+          const seasonStat = season.racerStats?.find(s => s.id === stats.id);
+          if (seasonStat) {
+            const position = Object.entries(season.finalStandings)
+              .sort(([, a], [, b]) => b - a)
+              .findIndex(([id]) => id === stats.id) + 1;
+            allSeasonStats.push({
+              seasonNumber: season.number,
+              position,
+              points: seasonStat.points,
+              first: seasonStat.first,
+              second: seasonStat.second,
+              third: seasonStat.third,
+              races: seasonStat.racesRun,
+              isCurrent: false
+            });
+          }
+        });
+
+        if (allSeasonStats.length === 0) return null;
+
+        return (
+          <View style={{ 
+            backgroundColor: theme.surface.card, 
+            padding: 20, 
+            marginBottom: 16, 
+            borderRadius: 24,
+          }}>
+            <Text style={{ 
+              color: theme.text.muted, 
+              fontSize: 10, 
+              fontWeight: 'bold', 
+              textTransform: 'uppercase', 
+              marginBottom: 16, 
+              letterSpacing: 1,
+            }}>Season History</Text>
+            
+            {allSeasonStats.sort((a, b) => b.seasonNumber - a.seasonNumber).map((season) => (
+              <TouchableOpacity
+                key={season.seasonNumber}
+                style={{
+                  backgroundColor: season.isCurrent ? theme.surface.elevated : theme.surface.dark,
+                  borderRadius: 12,
+                  padding: 14,
+                  marginBottom: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                onPress={() => onSeasonRacesClick?.(season.seasonNumber)}
+              >
+                <View style={{ 
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 18, 
+                  backgroundColor: season.position === 1 ? theme.semantic.gold : (season.position === 2 ? '#C0C0C0' : (season.position === 3 ? '#CD7F32' : theme.surface.darkest)),
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginRight: 12,
+                }}>
+                  <Text style={{ color: season.position <= 3 ? '#000' : theme.text.muted, fontWeight: '800', fontSize: 14 }}>
+                    {season.position}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.text.primary, fontWeight: '700', fontSize: 14 }}>
+                    Season {season.seasonNumber}{season.isCurrent ? ' (Current)' : ''}
+                  </Text>
+                  <Text style={{ color: theme.text.secondary, fontSize: 12 }}>
+                    {season.points} pts
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 10, color: '#FFD700', fontWeight: '700' }}>1st</Text>
+                    <Text style={{ color: theme.text.primary, fontWeight: '600', fontSize: 12, marginLeft: 2 }}>{season.first}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 10, color: '#C0C0C0', fontWeight: '700' }}>2nd</Text>
+                    <Text style={{ color: theme.text.primary, fontWeight: '600', fontSize: 12, marginLeft: 2 }}>{season.second}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 10, color: '#CD7F32', fontWeight: '700' }}>3rd</Text>
+                    <Text style={{ color: theme.text.primary, fontWeight: '600', fontSize: 12, marginLeft: 2 }}>{season.third}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        );
+      })()}
+
+      {/* Racer Stats */}
       <View style={{ 
         backgroundColor: theme.surface.card, 
         padding: 20, 
@@ -145,6 +322,52 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
           marginBottom: 16, 
           letterSpacing: 1,
         }}>Racer Stats</Text>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+          <View style={{ 
+            width: '48%', 
+            backgroundColor: theme.surface.elevated, 
+            padding: 16, 
+            borderRadius: 16,
+          }}>
+            <Text style={{ 
+              color: theme.text.muted, 
+              fontSize: 10, 
+              fontWeight: 'bold', 
+              textTransform: 'uppercase', 
+              marginBottom: 4, 
+              letterSpacing: 1,
+            }}>Preference</Text>
+            <Text style={{ 
+              color: theme.text.primary, 
+              fontWeight: 'bold', 
+              fontSize: 20, 
+              textTransform: 'capitalize',
+            }}>{stats.trackPreference}</Text>
+          </View>
+          
+          <View style={{ 
+            width: '48%', 
+            backgroundColor: theme.surface.elevated, 
+            padding: 16, 
+            borderRadius: 16,
+          }}>
+            <Text style={{ 
+              color: theme.text.muted, 
+              fontSize: 10, 
+              fontWeight: 'bold', 
+              textTransform: 'uppercase', 
+              marginBottom: 4, 
+              letterSpacing: 1,
+            }}>Strategy</Text>
+            <Text style={{ 
+              color: theme.text.primary, 
+              fontWeight: 'bold', 
+              fontSize: 20,
+              textTransform: 'capitalize',
+            }}>{stats.strategy}</Text>
+          </View>
+        </View>
         
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
           <View style={{ 
@@ -215,68 +438,8 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
             </View>
           </View>
         </View>
-        
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <View style={{ 
-            width: '48%', 
-            backgroundColor: theme.surface.elevated, 
-            padding: 16, 
-            borderRadius: 16,
-          }}>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase', 
-              marginBottom: 4, 
-              letterSpacing: 1,
-            }}>Preference</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontWeight: 'bold', 
-              fontSize: 20, 
-              textTransform: 'capitalize',
-            }}>{stats.trackPreference}</Text>
-          </View>
-          
-          <View style={{ 
-            width: '48%', 
-            backgroundColor: theme.surface.elevated, 
-            padding: 16, 
-            borderRadius: 16,
-          }}>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase', 
-              marginBottom: 4, 
-              letterSpacing: 1,
-            }}>Strategy</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontWeight: 'bold', 
-              fontSize: 20,
-            }}>{stats.strategy}</Text>
-          </View>
-        </View>
-      </View>
 
-      <View style={{ 
-        backgroundColor: theme.surface.card, 
-        padding: 20, 
-        marginBottom: 16, 
-        borderRadius: 24,
-      }}>
-        <Text style={{ 
-          color: theme.text.muted, 
-          fontSize: 10, 
-          fontWeight: 'bold', 
-          textTransform: 'uppercase', 
-          marginBottom: 16, 
-          letterSpacing: 1,
-        }}>Attributes</Text>
-        
+        {/* Attributes - merged into Racer Stats */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
           <View style={{ 
             width: '48%', 
@@ -284,31 +447,10 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
             padding: 16, 
             borderRadius: 16,
           }}>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase', 
-              marginBottom: 4, 
-              letterSpacing: 1,
-            }}>Acceleration</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontWeight: 'bold', 
-              fontSize: 20,
-              marginBottom: 8,
-            }}>{(stats.acceleration || 50)}</Text>
-            <View style={{ 
-              height: 6, 
-              backgroundColor: theme.surface.dark, 
-              borderRadius: 999, 
-              overflow: 'hidden',
-            }}>
-              <View style={{ 
-                height: '100%', 
-                backgroundColor: '#F59E0B', 
-                width: `${stats.acceleration || 50}%`,
-              }} />
+            <Text style={{ color: theme.text.muted, fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' }}>Acceleration</Text>
+            <Text style={{ color: theme.text.primary, fontWeight: 'bold', fontSize: 18 }}>{(stats.acceleration || 50)}</Text>
+            <View style={{ height: 4, backgroundColor: theme.surface.dark, borderRadius: 999, overflow: 'hidden', marginTop: 4 }}>
+              <View style={{ height: '100%', backgroundColor: '#F59E0B', width: `${stats.acceleration || 50}%` }} />
             </View>
           </View>
           
@@ -318,31 +460,10 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
             padding: 16, 
             borderRadius: 16,
           }}>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase', 
-              marginBottom: 4, 
-              letterSpacing: 1,
-            }}>Endurance</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontWeight: 'bold', 
-              fontSize: 20,
-              marginBottom: 8,
-            }}>{(stats.endurance || 50)}</Text>
-            <View style={{ 
-              height: 6, 
-              backgroundColor: theme.surface.dark, 
-              borderRadius: 999, 
-              overflow: 'hidden',
-            }}>
-              <View style={{ 
-                height: '100%', 
-                backgroundColor: '#22C55E', 
-                width: `${stats.endurance || 50}%`,
-              }} />
+            <Text style={{ color: theme.text.muted, fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' }}>Endurance</Text>
+            <Text style={{ color: theme.text.primary, fontWeight: 'bold', fontSize: 18 }}>{(stats.endurance || 50)}</Text>
+            <View style={{ height: 4, backgroundColor: theme.surface.dark, borderRadius: 999, overflow: 'hidden', marginTop: 4 }}>
+              <View style={{ height: '100%', backgroundColor: '#22C55E', width: `${stats.endurance || 50}%` }} />
             </View>
           </View>
         </View>
@@ -354,31 +475,10 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
             padding: 16, 
             borderRadius: 16,
           }}>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase', 
-              marginBottom: 4, 
-              letterSpacing: 1,
-            }}>Consistency</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontWeight: 'bold', 
-              fontSize: 20,
-              marginBottom: 8,
-            }}>{(stats.consistency || 50)}</Text>
-            <View style={{ 
-              height: 6, 
-              backgroundColor: theme.surface.dark, 
-              borderRadius: 999, 
-              overflow: 'hidden',
-            }}>
-              <View style={{ 
-                height: '100%', 
-                backgroundColor: '#3B82F6', 
-                width: `${stats.consistency || 50}%`,
-              }} />
+            <Text style={{ color: theme.text.muted, fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' }}>Consistency</Text>
+            <Text style={{ color: theme.text.primary, fontWeight: 'bold', fontSize: 18 }}>{(stats.consistency || 50)}</Text>
+            <View style={{ height: 4, backgroundColor: theme.surface.dark, borderRadius: 999, overflow: 'hidden', marginTop: 4 }}>
+              <View style={{ height: '100%', backgroundColor: '#3B82F6', width: `${stats.consistency || 50}%` }} />
             </View>
           </View>
           
@@ -388,117 +488,16 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
             padding: 16, 
             borderRadius: 16,
           }}>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase', 
-              marginBottom: 4, 
-              letterSpacing: 1,
-            }}>Stamina Recovery</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontWeight: 'bold', 
-              fontSize: 20,
-              marginBottom: 8,
-            }}>{(stats.staminaRecovery || 50)}</Text>
-            <View style={{ 
-              height: 6, 
-              backgroundColor: theme.surface.dark, 
-              borderRadius: 999, 
-              overflow: 'hidden',
-            }}>
-              <View style={{ 
-                height: '100%', 
-                backgroundColor: '#8B5CF6', 
-                width: `${stats.staminaRecovery || 50}%`,
-              }} />
+            <Text style={{ color: theme.text.muted, fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' }}>Stamina Rec</Text>
+            <Text style={{ color: theme.text.primary, fontWeight: 'bold', fontSize: 18 }}>{(stats.staminaRecovery || 50)}</Text>
+            <View style={{ height: 4, backgroundColor: theme.surface.dark, borderRadius: 999, overflow: 'hidden', marginTop: 4 }}>
+              <View style={{ height: '100%', backgroundColor: '#8B5CF6', width: `${stats.staminaRecovery || 50}%` }} />
             </View>
           </View>
         </View>
       </View>
 
-      <View style={{ 
-        backgroundColor: theme.surface.card, 
-        padding: 20, 
-        borderRadius: 24,
-      }}>
-        <Text style={{ 
-          color: theme.text.muted, 
-          fontSize: 10, 
-          fontWeight: 'bold', 
-          textTransform: 'uppercase', 
-          marginBottom: 16, 
-          letterSpacing: 1,
-        }}>Career Performance</Text>
-        
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <View style={{ 
-            alignItems: 'center', 
-            backgroundColor: theme.surface.elevated, 
-            padding: 16, 
-            borderRadius: 16, 
-            width: '30%',
-          }}>
-            <Text style={{ fontSize: 20, marginBottom: 4 }}>🥇</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontSize: 28, 
-              fontWeight: '900',
-            }}>{stats.first}</Text>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase',
-            }}>1st</Text>
-          </View>
-          
-          <View style={{ 
-            alignItems: 'center', 
-            backgroundColor: theme.surface.elevated, 
-            padding: 16, 
-            borderRadius: 16, 
-            width: '30%',
-          }}>
-            <Text style={{ fontSize: 20, marginBottom: 4 }}>🥈</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontSize: 28, 
-              fontWeight: '900',
-            }}>{stats.second}</Text>
-            <Text style={{ 
-              color: theme.text.muted, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase',
-            }}>2nd</Text>
-          </View>
-          
-          <View style={{ 
-            alignItems: 'center', 
-            backgroundColor: theme.surface.elevated, 
-            padding: 16, 
-            borderRadius: 16, 
-            width: '30%',
-          }}>
-            <Text style={{ fontSize: 20, marginBottom: 4 }}>🥉</Text>
-            <Text style={{ 
-              color: theme.text.primary, 
-              fontSize: 28, 
-              fontWeight: '900',
-            }}>{stats.third}</Text>
-            <Text style={{ 
-              color: theme.text.tertiary, 
-              fontSize: 10, 
-              fontWeight: 'bold', 
-              textTransform: 'uppercase',
-            }}>3rd</Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Track Averages */}
+      {/* Track Averages Card */}
       {(() => {
         const trackAverages = useMemo(() => getRacerTrackAverages(stats.id, schedule), [stats.id, schedule]);
         console.log('🏁 trackAverages', { racerId: stats.id, count: trackAverages.length, data: trackAverages });
@@ -515,7 +514,7 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
         };
 
         return (
-          <View style={{ marginTop: 16 }}>
+          <View style={{ marginTop: 16, backgroundColor: theme.surface.card, padding: 20, borderRadius: 24 }}>
             <Text style={{ 
               color: theme.text.muted, 
               fontSize: 10, 
@@ -526,8 +525,10 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
             }}>Track Averages</Text>
             
             {trackAverages.map((track: TrackAverage) => (
-              <View 
+              <TouchableOpacity 
                 key={track.trackId}
+                onPress={() => onTrackClick?.(track.trackId)}
+                disabled={!onTrackClick}
                 style={{
                   backgroundColor: theme.surface.elevated,
                   borderRadius: 12,
@@ -539,16 +540,6 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
                   <Text style={{ color: theme.text.primary, fontWeight: '700', fontSize: 15, flex: 1 }}>
                     {track.trackName}
                   </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {track.wins > 0 && (
-                      <Text style={{ fontSize: 14, marginRight: 8 }}>
-                        {track.wins === 1 ? '🥇' : `🥇x${track.wins}`}
-                      </Text>
-                    )}
-                    <Text style={{ color: theme.text.secondary, fontSize: 12 }}>
-                      {track.totalRaces} {track.totalRaces === 1 ? 'race' : 'races'}
-                    </Text>
-                  </View>
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <View>
@@ -560,7 +551,7 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
                     <Text style={{ color: theme.primary[300], fontWeight: '600', fontSize: 14 }}>{formatTime(track.bestFinishTime)}</Text>
                   </View>
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         );

@@ -8,6 +8,7 @@ interface RaceResultsDrawerProps {
   results: Racer[];
   trackName?: string;
   onClose: () => void;
+  onRacerClick?: (racerId: string) => void;
 }
 
 export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
@@ -15,6 +16,7 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
   results,
   trackName,
   onClose,
+  onRacerClick,
 }) => {
   const translateY = useRef(new Animated.Value(0)).current;
   const scrollOffsetY = useRef(0);
@@ -120,8 +122,10 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
         scrollEventThrottle={16}
       >
         {results.map((racer, index) => (
-          <View
+          <TouchableOpacity
             key={racer.id}
+            onPress={() => onRacerClick?.(racer.id)}
+            disabled={!onRacerClick}
             style={{
               flexDirection: 'row',
               alignItems: 'center',
@@ -187,7 +191,7 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
                 <Text style={{ fontSize: 10, color: theme.text.muted }}>finish time</Text>
               )}
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
 

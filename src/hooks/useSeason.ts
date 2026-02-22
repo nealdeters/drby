@@ -39,6 +39,7 @@ export interface CompletedSeason {
   totalRaces: number;
   finalStandings: Record<string, number>;
   racerStats: RacerSeasonStats[];
+  races: RaceEvent[];
 }
 
 export const useSeason = () => {
@@ -194,9 +195,9 @@ export const useSeason = () => {
     const now = Date.now();
     const seasonPrefix = `s${seasonNum}`;
     
-    // 24-Hour Season: 144 races, 10 minutes apart (6 races per hour)
-    // Schedule: Continuous 24-hour cycle starting 1 hour from now
-    for (let i = 0; i < 144; i++) {
+    // 1-Week Season: 1008 races, 10 minutes apart (6 races per hour)
+    // Schedule: Continuous 7-day cycle starting 1 hour from now
+    for (let i = 0; i < 1008; i++) {
       // Pick 4-6 random racers for better competition
       const numRacers = 4 + Math.floor(Math.random() * 3); // 4-6 racers
       const shuffled = [...currentRoster].sort(() => 0.5 - Math.random());
@@ -275,7 +276,8 @@ export const useSeason = () => {
               },
               totalRaces: schedule.filter(r => r.completed).length,
               finalStandings: { ...savedStandings },
-              racerStats
+              racerStats,
+              races: schedule.filter(r => r.completed)
             };
             
           const updatedSeasons = [...savedSeasons, completedSeason];
@@ -299,6 +301,9 @@ export const useSeason = () => {
       });
       setStandings(resetStandings);
       await racesService.saveStandings(resetStandings);
+      
+      // Reset racer health for new season (fresh start)
+      setRoster(prev => prev.map(r => ({ ...r, health: 100 })));
       
       // Generate new schedule
       await generateSchedule(currentRoster, currentTracks, newSeasonNumber);
@@ -366,7 +371,8 @@ export const useSeason = () => {
             },
             totalRaces: schedule.filter(r => r.completed).length,
             finalStandings: { ...standings },
-            racerStats
+            racerStats,
+            races: schedule.filter(r => r.completed)
           };
           
           const updatedSeasons = [...completedSeasons, completedSeason];
@@ -388,6 +394,9 @@ export const useSeason = () => {
       resetStandings[r.id] = 0;
     });
     setStandings(resetStandings);
+    
+    // Reset racer health for new season (fresh start)
+    setRoster(prev => prev.map(r => ({ ...r, health: 100 })));
     
     // Clear schedule and generate new one
     setSchedule([]);

@@ -245,18 +245,18 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
               {displayedRaces.length} race{displayedRaces.length !== 1 ? 's' : ''} {filter === 'upcoming' ? 'remaining' : 'total'}
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
             <TouchableOpacity
               onPress={() => setFilter('upcoming')}
               style={{
-                paddingHorizontal: 12,
+                paddingHorizontal: 10,
                 paddingVertical: 6,
-                borderRadius: 12,
+                borderRadius: 10,
                 backgroundColor: filter === 'upcoming' ? theme.semantic.success : theme.surface.darkest,
               }}
             >
               <Text style={{
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: '700',
                 color: filter === 'upcoming' ? '#000' : theme.text.muted,
               }}>
@@ -266,14 +266,14 @@ export const ScheduleList = ({ schedule, roster, onBack, onRaceClick }: Schedule
             <TouchableOpacity
               onPress={() => setFilter('all')}
               style={{
-                paddingHorizontal: 12,
+                paddingHorizontal: 10,
                 paddingVertical: 6,
-                borderRadius: 12,
+                borderRadius: 10,
                 backgroundColor: filter === 'all' ? theme.semantic.success : theme.surface.darkest,
               }}
             >
               <Text style={{
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: '700',
                 color: filter === 'all' ? '#000' : theme.text.muted,
               }}>

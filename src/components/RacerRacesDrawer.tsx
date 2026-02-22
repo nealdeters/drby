@@ -160,6 +160,7 @@ export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
         >
           {sortedRaces.map((race, index) => {
             const position = race.results ? race.results.indexOf(racerId) + 1 : -1;
+            const racerFinishTime = race.finishTimes?.[racerId];
             
             return (
               <TouchableOpacity
@@ -182,9 +183,16 @@ export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
                   <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text.primary }}>
                     {race.track?.name || 'Unknown Track'}
                   </Text>
-                  <Text style={{ fontSize: 12, color: theme.text.muted, marginTop: 2 }}>
-                    {new Date(race.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} • {race.racerIds.length} racers
-                  </Text>
+                  <View style={{ flexDirection: 'row', marginTop: 2 }}>
+                    <Text style={{ fontSize: 12, color: theme.text.muted }}>
+                      {new Date(race.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    {racerFinishTime && (
+                      <Text style={{ fontSize: 12, color: theme.primary[300], marginLeft: 8, fontWeight: '600' }}>
+                        {formatTime(racerFinishTime)}
+                      </Text>
+                    )}
+                  </View>
                 </View>
                 {position > 0 && (
                   <View style={{
@@ -211,6 +219,7 @@ export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
         >
           {selectedRace?.results?.map((resultRacerId, index) => {
             const resultRacer = roster.find(r => r.id === resultRacerId);
+            const finishTime = selectedRace.finishTimes?.[resultRacerId];
             if (!resultRacer) return null;
             
             return (
@@ -251,9 +260,16 @@ export const RacerRacesDrawer: React.FC<RacerRacesDrawerProps> = ({
                   <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text.primary }}>
                     {resultRacer.name}
                   </Text>
-                  <Text style={{ fontSize: 12, color: theme.text.muted }}>
-                    Lane {resultRacer.lane || index + 1}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, color: theme.text.muted }}>
+                      Lane {resultRacer.lane || index + 1}
+                    </Text>
+                    {finishTime && (
+                      <Text style={{ fontSize: 12, color: theme.primary[300], fontWeight: '600', marginLeft: 8 }}>
+                        {formatTime(finishTime)}
+                      </Text>
+                    )}
+                  </View>
                 </View>
 
                 {resultRacer.status === 'injured' && (

@@ -24,7 +24,7 @@ export const API_URL = `${getBaseUrl()}/.netlify/functions`; // Direct function 
 
 export const headers = {
   'Content-Type': 'application/json',
-  'x-api-key': process.env.API_KEY || '',
+  'x-api-key': import.meta.env.VITE_API_KEY as string || '',
 };
 
 // Ably Realtime client (for WebSocket connections)
@@ -32,10 +32,20 @@ let ablyClient: Ably.Realtime | null = null;
 
 export const getAblyClient = () => {
   const ablyKey = import.meta.env.VITE_ABLY_API_KEY as string | undefined;
-  console.log('[Ably] Checking for API key, found:', ablyKey ? 'yes' : 'no');
+  console.log('[Ably] Checking for API key, found:', ablyKey ? 'yes' : 'no', 'URL:', typeof window !== 'undefined' ? window.location.href : 'N/A');
   if (!ablyClient && ablyKey) {
     ablyClient = new Ably.Realtime(ablyKey);
     console.log('[Ably] Client initialized');
+    
+    ablyClient.connection.on('connected', () => {
+      console.log('[Ably] Connection connected');
+    });
+    ablyClient.connection.on('disconnected', () => {
+      console.log('[Ably] Connection disconnected');
+    });
+    ablyClient.connection.on('failed', (err) => {
+      console.log('[Ably] Connection failed:', err);
+    });
   }
   return ablyClient;
 };

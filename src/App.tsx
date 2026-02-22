@@ -563,7 +563,17 @@ export default function App() {
             if (!race.completed) {
               navigate({ view: 'race' });
             } else if (race.results && race.results.length > 0) {
-              const results = race.results.map(id => roster.find(r => r.id === id)).filter(Boolean) as Racer[];
+              const results = race.results.map((id, index) => {
+                const racer = roster.find(r => r.id === id);
+                if (racer) {
+                  return {
+                    ...racer,
+                    finishTime: race.finishTimes?.[id],
+                    lane: index + 1,
+                  };
+                }
+                return null;
+              }).filter(Boolean) as Racer[];
               setRaceResults(results);
               setResultsTrackName(race.track?.name);
               setShowResultsDrawer(true);
@@ -661,12 +671,29 @@ export default function App() {
           currentSeasonPoints={standings[selectedRacerId] || 0}
           currentSeasonNumber={currentSeasonNumber}
           schedule={schedule}
+          completedSeasons={completedSeasons}
+          roster={roster}
           onBack={() => goBack()}
           onOpenRacesDrawer={() => {
             const racerSchedule = schedule.filter(r => r.racerIds.includes(selectedRacerId) && r.completed);
             setRacerRacesSchedule(racerSchedule);
             setShowRacerRacesDrawer(true);
           }}
+          onSeasonRacesClick={(seasonNumber) => {
+            if (seasonNumber === currentSeasonNumber) {
+              const racerSchedule = schedule.filter(r => r.racerIds.includes(selectedRacerId) && r.completed);
+              setRacerRacesSchedule(racerSchedule);
+              setShowRacerRacesDrawer(true);
+            } else {
+              const season = completedSeasons.find(s => s.number === seasonNumber);
+              if (season && season.races) {
+                const racerSchedule = season.races.filter(r => r.racerIds.includes(selectedRacerId));
+                setRacerRacesSchedule(racerSchedule);
+                setShowRacerRacesDrawer(true);
+              }
+            }
+          }}
+          onTrackClick={() => navigate({ view: 'tracks' })}
         />
       )}
 
@@ -775,7 +802,9 @@ export default function App() {
               currentSeasonPoints={historicalStats.points}
               currentSeasonNumber={selectedHistoricalSeason.number}
               schedule={[]}
+              completedSeasons={completedSeasons}
               onBack={() => goBack()}
+              onTrackClick={() => navigate({ view: 'tracks' })}
             />
           );
         })()
@@ -919,39 +948,103 @@ export default function App() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-                <FlatList
-                  data={standingsData
-                    .sort((a: any, b: any) => b.points - a.points)}
-                  renderItem={({ item, index }) => (
-                    <StandingsItem 
-                      racer={{
-                        id: item.id,
-                        name: item.name,
-                        color: item.color,
-                        baseSpeed: item.baseSpeed,
-                        health: item.health,
-                        strategy: item.strategy as any,
-                        trackPreference: item.trackPreference as any,
-                        acceleration: item.acceleration || 50,
-                        endurance: item.endurance || 50,
-                        consistency: item.consistency || 50,
-                        staminaRecovery: item.staminaRecovery || 50,
-                        lane: 0,
-                        progress: 0,
-                        laps: 0,
-                        totalDistance: 0,
-                        status: 'finished',
-                        currentSpeed: 0
-                      }} 
-                      index={index} 
-                      points={item.points} 
-                      stats={{ first: item.first || 0, second: item.second || 0, third: item.third || 0 }} 
-                      onPress={() => {}} 
-                    />
-                  )}
-                  keyExtractor={(item) => item.id}
-                  contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
-                />
+                {/* Podium for Top 3 */}
+                {(() => {
+                  const sortedData = standingsData.sort((a: any, b: any) => b.points - a.points);
+                  const topThree = sortedData.slice(0, 3);
+                  const rest = sortedData.slice(3);
+                  
+                  return (
+                    <>
+                      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+                        {/* Podium */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', marginBottom: 24 }}>
+                          {/* 2nd Place */}
+                          {topThree[1] && (
+                            <TouchableOpacity
+                              onPress={() => navigate({ selectedRacerId: topThree[1].id, view: 'profile' })}
+                              style={{ flex: 1, alignItems: 'center', paddingHorizontal: 4 }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: topThree[1].color, marginBottom: 8, borderWidth: 2, borderColor: '#C0C0C0' }} />
+                              <Text style={{ fontSize: 28, marginBottom: 4 }}>🥈</Text>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text.primary, textAlign: 'center' }} numberOfLines={1}>{topThree[1].name}</Text>
+                              <Text style={{ fontSize: 11, color: theme.text.secondary }}>{topThree[1].points} pts</Text>
+                              <View style={{ width: '100%', height: 60, backgroundColor: '#C0C0C0', borderTopLeftRadius: 8, borderTopRightRadius: 8, marginTop: 8, justifyContent: 'flex-start', alignItems: 'center', paddingTop: 4 }}>
+                                <Text style={{ color: '#333', fontWeight: '800', fontSize: 16 }}>2</Text>
+                              </View>
+                            </TouchableOpacity>
+                          )}
+                          {/* 1st Place */}
+                          {topThree[0] && (
+                            <TouchableOpacity
+                              onPress={() => navigate({ selectedRacerId: topThree[0].id, view: 'profile' })}
+                              style={{ flex: 1, alignItems: 'center', paddingHorizontal: 4 }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: topThree[0].color, marginBottom: 8, borderWidth: 3, borderColor: '#FFD700' }} />
+                              <Text style={{ fontSize: 36, marginBottom: 4 }}>🥇</Text>
+                              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text.primary, textAlign: 'center' }} numberOfLines={1}>{topThree[0].name}</Text>
+                              <Text style={{ fontSize: 12, color: theme.text.secondary }}>{topThree[0].points} pts</Text>
+                              <View style={{ width: '100%', height: 80, backgroundColor: '#FFD700', borderTopLeftRadius: 8, borderTopRightRadius: 8, marginTop: 8, justifyContent: 'flex-start', alignItems: 'center', paddingTop: 4 }}>
+                                <Text style={{ color: '#333', fontWeight: '800', fontSize: 20 }}>1</Text>
+                              </View>
+                            </TouchableOpacity>
+                          )}
+                          {/* 3rd Place */}
+                          {topThree[2] && (
+                            <TouchableOpacity
+                              onPress={() => navigate({ selectedRacerId: topThree[2].id, view: 'profile' })}
+                              style={{ flex: 1, alignItems: 'center', paddingHorizontal: 4 }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: topThree[2].color, marginBottom: 8, borderWidth: 2, borderColor: '#CD7F32' }} />
+                              <Text style={{ fontSize: 24, marginBottom: 4 }}>🥉</Text>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: theme.text.primary, textAlign: 'center' }} numberOfLines={1}>{topThree[2].name}</Text>
+                              <Text style={{ fontSize: 11, color: theme.text.secondary }}>{topThree[2].points} pts</Text>
+                              <View style={{ width: '100%', height: 48, backgroundColor: '#CD7F32', borderTopLeftRadius: 8, borderTopRightRadius: 8, marginTop: 8, justifyContent: 'flex-start', alignItems: 'center', paddingTop: 4 }}>
+                                <Text style={{ color: '#333', fontWeight: '800', fontSize: 14 }}>3</Text>
+                              </View>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                      {/* Rest of standings */}
+                      <FlatList
+                        data={rest}
+                        renderItem={({ item, index }) => (
+                          <StandingsItem 
+                            racer={{
+                              id: item.id,
+                              name: item.name,
+                              color: item.color,
+                              baseSpeed: item.baseSpeed,
+                              health: item.health,
+                              strategy: item.strategy as any,
+                              trackPreference: item.trackPreference as any,
+                              acceleration: item.acceleration || 50,
+                              endurance: item.endurance || 50,
+                              consistency: item.consistency || 50,
+                              staminaRecovery: item.staminaRecovery || 50,
+                              lane: 0,
+                              progress: 0,
+                              laps: 0,
+                              totalDistance: 0,
+                              status: 'finished',
+                              currentSpeed: 0
+                            }} 
+                            index={index + 3}
+                            points={item.points} 
+                            stats={{ first: item.first || 0, second: item.second || 0, third: item.third || 0 }} 
+                            onPress={() => navigate({ selectedRacerId: item.id, view: 'profile' })} 
+                          />
+                        )}
+                        keyExtractor={(item) => item.id}
+                        contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
+                      />
+                    </>
+                  );
+                })()}
               </View>
             </View>
           );
@@ -994,7 +1087,7 @@ export default function App() {
             </View>
             <FlatList
               data={tracks}
-              renderItem={({ item }) => <TrackItem track={item} />}
+              renderItem={({ item }) => <TrackItem track={item} schedule={schedule} completedSeasons={completedSeasons} />}
               keyExtractor={(item) => item.id}
               contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 20 }}
             />
@@ -1016,6 +1109,7 @@ export default function App() {
         results={raceResults}
         trackName={resultsTrackName || nextRace?.track?.name}
         onClose={() => setShowResultsDrawer(false)}
+        onRacerClick={(racerId) => navigate({ selectedRacerId: racerId, view: 'profile' })}
       />
 
       {/* Racer Races Drawer */}
