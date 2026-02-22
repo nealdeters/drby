@@ -31,8 +31,8 @@ export const headers = {
 let ablyClient: Ably.Realtime | null = null;
 
 export const getAblyClient = () => {
-  if (!ablyClient && process.env.ABLY_API_KEY) {
-    ablyClient = new Ably.Realtime(process.env.ABLY_API_KEY);
+  if (!ablyClient && process.env.VITE_ABLY_API_KEY) {
+    ablyClient = new Ably.Realtime(process.env.VITE_ABLY_API_KEY);
   }
   return ablyClient;
 };
