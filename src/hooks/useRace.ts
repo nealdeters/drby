@@ -100,11 +100,43 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
           
           if (response.ok) {
             const result = await response.json();
-            if (result.exists && !result.isFinished) {
-              console.log('[useRace] Race already in progress, fetching current state...');
-              setIsRacing(true);
-              if (result.startTime) {
-                setRaceStartTime(result.startTime);
+            if (result.exists) {
+              if (!result.isFinished) {
+                console.log('[useRace] Race in progress, syncing...');
+                setIsRacing(true);
+                if (result.startTime) {
+                  setRaceStartTime(result.startTime);
+                }
+              } else {
+                console.log('[useRace] Race already finished, fetching results...');
+                setIsRacing(false);
+                // Fetch final results from storage
+                try {
+                  const resultsResponse = await fetch(`${API_URL}/races?raceId=${raceId}`, {
+                    method: 'GET',
+                    headers,
+                  });
+                  if (resultsResponse.ok) {
+                    const raceData = await resultsResponse.json();
+                    let results: any[] = [];
+                    if (raceData.racers && raceData.racers.length > 0) {
+                      setRacers(raceData.racers);
+                      results = raceData.racers;
+                      console.log('[useRace] Loaded final results:', raceData.racers.map((r: any) => r.name));
+                    } else if (raceData.results) {
+                      // Fallback: use results array directly if no racers populated
+                      console.log('[useRace] Using raw results:', raceData.results);
+                      results = raceData.results;
+                    }
+                    // Trigger onRaceFinish to advance to next race
+                    if (results.length > 0 && onRaceFinish) {
+                      console.log('[useRace] Triggering onRaceFinish for late-joining client');
+                      onRaceFinish(results);
+                    }
+                  }
+                } catch (err) {
+                  console.warn('[useRace] Failed to fetch results:', err);
+                }
               }
             }
           }

@@ -224,6 +224,52 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
     // Handle regular race endpoints
     if (method === 'GET') {
+      // Check for raceId query parameter
+      const queryParams = event.queryStringParameters || {};
+      const queryRaceId = queryParams.raceId;
+      
+      if (queryRaceId) {
+        try {
+          const data = await store.get(queryRaceId);
+          if (data) {
+            const raceData = JSON.parse(String(data));
+            // Fetch racer details from roster
+            const rosterData = await store.get(ROSTER_KEY);
+            const roster = rosterData ? JSON.parse(String(rosterData)) : [];
+            
+            // Map racer IDs to full racer objects - include both finished and DNF racers
+            let racers: any[] = [];
+            
+            // First add finished racers (in order)
+            if (raceData.results && Array.isArray(raceData.results)) {
+              const finishedRacers = raceData.results.map((id: string) => {
+                const racer = roster.find((r: any) => r.id === id);
+                return racer ? { ...racer, status: 'finished', finishTime: raceData.finishTimes?.[id] } : null;
+              }).filter(Boolean);
+              racers = [...finishedRacers];
+            }
+            
+            // Then add DNF racers
+            if (raceData.dnfRacers && Array.isArray(raceData.dnfRacers)) {
+              const dnfRacers = raceData.dnfRacers.map((id: string) => {
+                const racer = roster.find((r: any) => r.id === id);
+                return racer ? { ...racer, status: 'dnf' } : null;
+              }).filter(Boolean);
+              racers = [...racers, ...dnfRacers];
+            }
+            
+            return { 
+              statusCode: 200, 
+              headers: { "Content-Type": "application/json" }, 
+              body: JSON.stringify({ ...raceData, racers }) 
+            };
+          }
+          return { statusCode: 404, headers: { "Content-Type": "application/json" }, body: '{}' };
+        } catch (err) {
+          return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: '{}' };
+        }
+      }
+      
       if (pathId) {
         const data = await store.get(pathId);
         return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: String(data || '{}') };

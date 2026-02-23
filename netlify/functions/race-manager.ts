@@ -42,6 +42,7 @@ interface RaceState {
   startTime: number;
   tickCount: number;
   lastPublishedTick: number;
+  lastContinuationTick: number;
   isFinished: boolean;
 }
 
@@ -311,47 +312,52 @@ async function continueRace(
   }
 
   // Race not finished - trigger continuation
-  console.log(`🔄 Race ${raceId} continuing, elapsed: ${elapsed}ms, ticks: ${state.tickCount}`);
+  // Only trigger if we haven't already triggered for this tick (idempotency)
+  if (state.tickCount > state.lastContinuationTick) {
+    state.lastContinuationTick = state.tickCount;
+    console.log(`🔄 Race ${raceId} continuing, elapsed: ${elapsed}ms, ticks: ${state.tickCount}`);
 
-  // Publish to Ably for coordinator (backup) - but ALSO trigger HTTP for reliability
-  const controlChannel = ably.channels.get(`race:${raceId}:control`);
+    // Publish to Ably for coordinator
+    const controlChannel = ably.channels.get(`race:${raceId}:control`);
 
-  try {
-    await controlChannel.publish('continuation', {
-      raceId,
-      timestamp: Date.now(),
-    });
-    console.log(`📡 Published continuation message for race ${raceId}`);
-  } catch (err) {
-    console.error('Failed to publish continuation:', err);
-  }
-
-  // Trigger continuation via HTTP (reliable server-side continuation)
-  // Note: In local dev, we rely on the coordinator to trigger continuation via Ably
-  // since the function URL may not be accessible from within itself
-  const functionUrl = process.env.URL
-    ? `https://${process.env.URL}/.netlify/functions/race-manager`
-    : null;
-
-  if (functionUrl) {
     try {
-      await fetch(functionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.API_KEY || ''
-        },
-        body: JSON.stringify({
-          raceId,
-          continue: true
-        })
+      await controlChannel.publish('continuation', {
+        raceId,
+        timestamp: Date.now(),
+        tickCount: state.tickCount,
       });
-      console.log(`📡 HTTP triggered continuation for race ${raceId}`);
+      console.log(`📡 Published continuation message for race ${raceId} at tick ${state.tickCount}`);
     } catch (err) {
-      console.error('Failed to HTTP trigger continuation:', err);
+      console.error('Failed to publish continuation:', err);
+    }
+
+    // Trigger continuation via HTTP (reliable server-side continuation)
+    const functionUrl = process.env.URL
+      ? `https://${process.env.URL}/.netlify/functions/race-manager`
+      : null;
+
+    if (functionUrl) {
+      try {
+        await fetch(functionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': process.env.API_KEY || ''
+          },
+          body: JSON.stringify({
+            raceId,
+            continue: true
+          })
+        });
+        console.log(`📡 HTTP triggered continuation for race ${raceId}`);
+      } catch (err) {
+        console.error('Failed to HTTP trigger continuation:', err);
+      }
+    } else {
+      console.log(`📡 Skipping HTTP trigger in local dev`);
     }
   } else {
-    console.log(`📡 Skipping HTTP trigger in local dev, relying on coordinator for continuation`);
+    console.log(`⏭️ Continuation already triggered for tick ${state.tickCount}, skipping`);
   }
 
   return { shouldContinue: false, message: 'Race continuing' };
@@ -634,6 +640,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
     startTime,
     tickCount: 0,
     lastPublishedTick: -1,
+    lastContinuationTick: -1,
     isFinished: false,
   };
 

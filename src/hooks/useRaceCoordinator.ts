@@ -5,6 +5,7 @@ import { API_URL, headers } from '../services/apiClient';
 
 const CLIENT_ID_KEY = 'drby-client-id';
 const LAST_RACE_ID_KEY = 'drby-last-race-id';
+const LAST_PROCESSED_TICK_KEY = 'drby-last-processed-tick';
 
 function getOrCreateClientId(): string {
   let clientId = localStorage.getItem(CLIENT_ID_KEY);
@@ -41,6 +42,8 @@ export const useRaceCoordinator = ({
   const presenceRef = useRef<any>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const isCoordinatorRef = useRef(false);
+  const lastProcessedTickRef = useRef<number>(-1);
+  const pendingContinuationRef = useRef<boolean>(false);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -164,6 +167,9 @@ export const useRaceCoordinator = ({
           return;
         }
 
+        // Add delay to allow presence to settle
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         const members = await channel.presence.get();
         const newCoordinator = determineCoordinator(members);
         console.log('[Coordinator] Member left, new coordinator:', newCoordinator, 'myId:', clientIdRef.current);
@@ -225,10 +231,25 @@ export const useRaceCoordinator = ({
 
     const handleContinuation = (message: any) => {
       const data = message.data;
-      console.log('[Coordinator] Received continuation message:', data);
+      const messageTick = data.tickCount || 0;
+      console.log('[Coordinator] Received continuation message:', data, 'my last processed:', lastProcessedTickRef.current);
 
-      if (data.raceId === raceId && isCoordinatorRef.current) {
-        triggerContinuation(data.raceId);
+      // Only process if this is a new tick we haven't handled yet
+      if (data.raceId === raceId && isCoordinatorRef.current && messageTick > lastProcessedTickRef.current) {
+        // Prevent multiple concurrent continuation triggers
+        if (pendingContinuationRef.current) {
+          console.log('[Coordinator] Continuation already pending, skipping duplicate');
+          return;
+        }
+        
+        pendingContinuationRef.current = true;
+        lastProcessedTickRef.current = messageTick;
+        
+        triggerContinuation(data.raceId).finally(() => {
+          pendingContinuationRef.current = false;
+        });
+      } else {
+        console.log('[Coordinator] Skipping old continuation tick:', messageTick, 'our last:', lastProcessedTickRef.current);
       }
     };
 
@@ -238,7 +259,9 @@ export const useRaceCoordinator = ({
 
       if (data.raceId === raceId) {
         localStorage.removeItem(LAST_RACE_ID_KEY);
-        console.log('[Coordinator] Cleared last triggered race ID due to race-stopped');
+        lastProcessedTickRef.current = -1;
+        pendingContinuationRef.current = false;
+        console.log('[Coordinator] Cleared state due to race-stopped');
       }
     };
 
@@ -270,7 +293,17 @@ export const useRaceCoordinator = ({
 
     const checkAndTriggerRace = async () => {
       // Add small random delay to reduce chance of race condition between multiple coordinators
-      await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 100));
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
+      
+      // Double-check coordinator status after delay
+      const members = await channelRef.current?.presence.get();
+      if (!members) return;
+      
+      const coordinator = determineCoordinator(members);
+      if (coordinator !== clientIdRef.current) {
+        console.log('[Coordinator] Lost coordinator status during delay, aborting');
+        return;
+      }
       
       console.log('[Coordinator] Checking if race should be triggered:', raceId);
       try {
@@ -290,24 +323,31 @@ export const useRaceCoordinator = ({
             return;
           }
           
+          // Final coordinator check before triggering
+          const currentMembers = await channelRef.current?.presence.get();
+          const currentCoordinator = determineCoordinator(currentMembers || []);
+          if (currentCoordinator !== clientIdRef.current) {
+            console.log('[Coordinator] Lost coordinator status before triggering, aborting');
+            return;
+          }
+          
           if (!result.exists) {
             console.log('[Coordinator] Race not in progress, triggering...');
             localStorage.setItem(LAST_RACE_ID_KEY, raceId);
+            lastProcessedTickRef.current = -1;
             triggerRace();
           } else if (result.isFinished) {
             console.log('[Coordinator] Race already finished, not re-triggering');
           } else {
             console.log('[Coordinator] Race already in progress, skipping trigger');
+            // Sync tick count from server state
+            if (result.tickCount !== undefined) {
+              lastProcessedTickRef.current = result.tickCount;
+            }
           }
         }
       } catch (err) {
         console.error('[Coordinator] Failed to check race status:', err);
-        // On error, still try to trigger but check localStorage first
-        const lastTriggered = localStorage.getItem(LAST_RACE_ID_KEY);
-        if (lastTriggered !== raceId) {
-          localStorage.setItem(LAST_RACE_ID_KEY, raceId);
-          triggerRace();
-        }
       }
     };
 
