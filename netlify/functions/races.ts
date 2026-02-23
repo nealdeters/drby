@@ -229,8 +229,10 @@ export const handler: Handler = async (event: HandlerEvent) => {
       const queryRaceId = queryParams.raceId;
       
       if (queryRaceId) {
+        console.log(`[races] Fetching race with query param: ${queryRaceId}`);
         try {
           const data = await store.get(queryRaceId);
+          console.log(`[races] Got data for ${queryRaceId}:`, data ? 'yes' : 'no');
           if (data) {
             const raceData = JSON.parse(String(data));
             // Fetch racer details from roster

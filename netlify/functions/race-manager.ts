@@ -306,6 +306,32 @@ async function continueRace(
       timestamp: Date.now(),
     }));
 
+    // Update schedule to mark race as completed
+    try {
+      const scheduleData = await store.get('season-schedule');
+      if (scheduleData) {
+        const schedule = JSON.parse(String(scheduleData));
+        const updatedSchedule = schedule.map((race: any) => {
+          if (race.id === raceId) {
+            return { 
+              ...race, 
+              completed: true, 
+              results: results.map(r => r.id),
+              finishTimes: finishedRacers.reduce((acc, r) => {
+                if (r.finishTime) acc[r.id] = r.finishTime;
+                return acc;
+              }, {} as Record<string, number>)
+            };
+          }
+          return race;
+        });
+        await store.set('season-schedule', JSON.stringify(updatedSchedule));
+        console.log(`📅 Updated schedule: marked ${raceId} as completed`);
+      }
+    } catch (err) {
+      console.warn('⚠️ Failed to update schedule:', err);
+    }
+
     await deleteRaceState(store, raceId);
 
     return { shouldContinue: false, message: 'Race finished' };
