@@ -442,6 +442,43 @@ export const useSeason = () => {
     }
   }, [schedule, standings, roster, currentSeasonNumber, completedSeasons, tracks, isTransitioning]);
 
+  const resetSeason = useCallback(async () => {
+    console.log('🔄 Resetting all season data...');
+    
+    if (isTransitioning) {
+      console.log('⚠️ Season transition already in progress, skipping...');
+      return;
+    }
+    
+    setIsTransitioning(true);
+    
+    try {
+      // Clear all data on backend
+      await racesService.resetAll();
+      
+      // Reset state
+      setCompletedSeasons([]);
+      setCurrentSeasonNumber(1);
+      setStandings({});
+      
+      // Get fresh racers with full health
+      const freshRacers = await racersService.getAll();
+      setRoster(freshRacers);
+      
+      // Generate new schedule starting at next 0/10/20/30/40/50 minute
+      const newSchedule = await generateSchedule(freshRacers, tracks, 1);
+      setSchedule(newSchedule);
+      const next = newSchedule.find(r => !r.completed);
+      setNextRace(next || null);
+      
+      console.log('✅ Season reset complete');
+    } catch (error) {
+      console.error('❌ Error resetting season:', error);
+    } finally {
+      setIsTransitioning(false);
+    }
+  }, [isTransitioning, tracks]);
+
   // Check if all races are completed and start new season
   useEffect(() => {
     if (schedule.length > 0 && schedule.every(r => r.completed) && roster.length > 0 && tracks.length > 0) {
@@ -579,5 +616,5 @@ export const useSeason = () => {
     return historical;
   };
 
-  return { roster, schedule, standings, nextRace, completeRace, skipOverdueRace, tracks, loading, completedSeasons, currentSeasonNumber, getHistoricalStandings };
+  return { roster, schedule, standings, nextRace, completeRace, skipOverdueRace, tracks, loading, completedSeasons, currentSeasonNumber, getHistoricalStandings, resetSeason };
 };

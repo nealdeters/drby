@@ -30,6 +30,7 @@ interface RaceUpdate {
   results?: Racer[];
   progressMap?: Record<string, number>;
   dnfRacers?: Racer[];
+  tickCount?: number;
 }
 
 interface RaceState {
@@ -40,24 +41,45 @@ interface RaceState {
   totalDistance: number;
   startTime: number;
   tickCount: number;
+  lastPublishedTick: number;
   isFinished: boolean;
 }
 
 const getRaceStateKey = (raceId: string) => `race-state-${raceId}`;
 const getRaceLockKey = (raceId: string) => `race-lock-${raceId}`;
-const LOCK_TTL_SECONDS = 30; // Lock expires after 30 seconds
+const LOCK_TTL_SECONDS = 300; // Lock expires after 5 minutes
 
 async function acquireLock(store: any, raceId: string): Promise<boolean> {
   const lockKey = getRaceLockKey(raceId);
   try {
-    // Try to set the lock with TTL - succeeds only if key doesn't exist
+    // First check if lock already exists
+    const existingLock = await store.get(lockKey);
+    if (existingLock) {
+      // Lock exists - check if it's stale (older than TTL)
+      try {
+        const lockData = JSON.parse(String(existingLock));
+        const lockAge = Date.now() - lockData.lockedAt;
+        if (lockAge < LOCK_TTL_SECONDS * 1000) {
+          // Lock is valid and not expired
+          return false;
+        }
+        // Lock is stale - delete it and try to acquire
+        await store.delete(lockKey);
+      } catch {
+        // If we can't parse it, treat as stale lock
+        await store.delete(lockKey);
+      }
+    }
+    
+    // Try to set the lock with TTL
     await store.set(lockKey, JSON.stringify({ 
       lockedAt: Date.now(),
       raceId 
     }), { expiration: LOCK_TTL_SECONDS });
     return true;
   } catch (err) {
-    // Key already exists - lock not acquired
+    // Any error - lock not acquired
+    console.warn('Failed to acquire lock:', err);
     return false;
   }
 }
@@ -113,6 +135,16 @@ async function continueRace(
 
   // Run simulation for up to maxDuration
   while (Date.now() - raceStartTime < maxDuration && !state.isFinished) {
+    // Periodically check if race was stopped externally
+    if (state.tickCount % 50 === 0) {
+      const currentState = await loadRaceState(store, raceId);
+      if (currentState && currentState.isFinished) {
+        console.log(`🏁 Race ${raceId} stopped externally, finishing...`);
+        state.isFinished = true;
+        break;
+      }
+    }
+    
     const now = Date.now();
     elapsed = now - startTime;
     state.tickCount++;
@@ -210,14 +242,18 @@ async function continueRace(
       }
     }
 
-    // Publish progress update
-    await publishRaceUpdate(channel, {
-      type: 'progress',
-      raceId,
-      timestamp: now,
-      racers: state.racers,
-      progressMap,
-    });
+    // Only publish if this is a new tick (deduplication)
+    if (state.tickCount > state.lastPublishedTick) {
+      await publishRaceUpdate(channel, {
+        type: 'progress',
+        raceId,
+        timestamp: now,
+        racers: state.racers,
+        progressMap,
+        tickCount: state.tickCount,
+      });
+      state.lastPublishedTick = state.tickCount;
+    }
 
     // Check if finished
     if (allFinished) {
@@ -254,6 +290,7 @@ async function continueRace(
       timestamp: Date.now(),
       results,
       dnfRacers: state.dnfRacers,
+      tickCount: state.tickCount,
     });
 
     await store.set(raceId, JSON.stringify({
@@ -469,6 +506,17 @@ export const handler: Handler = async (event: HandlerEvent) => {
       await releaseLock(store, raceId);
       return { statusCode: 404, body: JSON.stringify({ error: "Race state not found" }) };
     }
+    
+    // Check if race was stopped externally before continuing
+    if (existingState.isFinished) {
+      await releaseLock(store, raceId);
+      console.log(`🏁 Race ${raceId} was stopped externally, not continuing`);
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shouldContinue: false, message: "Race stopped externally" }),
+      };
+    }
 
     const result = await continueRace(ablyApiKey, existingState, store, siteId, token, true);
     
@@ -489,6 +537,17 @@ export const handler: Handler = async (event: HandlerEvent) => {
     return { statusCode: 400, body: JSON.stringify({ error: "Missing required fields: racers, track" }) };
   }
 
+  // First, check if race already exists in state (before even trying to lock)
+  const existingState = await loadRaceState(store, raceId);
+  if (existingState) {
+    console.log(`Race ${raceId} already exists in state, returning current state`);
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Race already in progress", raceId, channel: `race:${raceId}` }),
+    };
+  }
+
   // Try to acquire lock before starting new race
   const lockAcquired = await acquireLock(store, raceId);
   if (!lockAcquired) {
@@ -500,11 +559,11 @@ export const handler: Handler = async (event: HandlerEvent) => {
     };
   }
 
-  // Check if race already exists in state
-  const existingState = await loadRaceState(store, raceId);
-  if (existingState) {
+  // Check again if race already exists (double-check after acquiring lock)
+  const existingStateAfterLock = await loadRaceState(store, raceId);
+  if (existingStateAfterLock) {
     await releaseLock(store, raceId);
-    console.log(`Race ${raceId} already exists, returning current state`);
+    console.log(`Race ${raceId} already exists (checked after lock), returning current state`);
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
@@ -574,6 +633,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
     totalDistance,
     startTime,
     tickCount: 0,
+    lastPublishedTick: -1,
     isFinished: false,
   };
 
@@ -584,6 +644,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
     timestamp: startTime,
     racers: raceRacers,
     progressMap: raceRacers.reduce((acc, r) => { acc[r.id] = 0; return acc; }, {} as Record<string, number>),
+    tickCount: 0,
   });
 
   // Save initial state

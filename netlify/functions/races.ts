@@ -28,6 +28,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const isCompletedSeasonsRequest = segments.length > 3 && segments[segments.length - 1] === 'completed-seasons';
   const isSeasonNumberRequest = segments.length > 3 && segments[segments.length - 1] === 'season-number';
   const isRosterRequest = segments.length > 3 && segments[segments.length - 1] === 'roster';
+  const isResetRequest = segments.length > 3 && segments[segments.length - 1] === 'reset-all';
 
   try {
     const method = event.httpMethod;
@@ -131,6 +132,19 @@ export const handler: Handler = async (event: HandlerEvent) => {
         return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true }) };
       }
       
+      return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+    }
+
+    // Handle reset-all endpoint - clears all data
+    if (isResetRequest) {
+      if (method === 'POST') {
+        await store.set(SCHEDULE_KEY, JSON.stringify([]));
+        await store.set(STANDINGS_KEY, JSON.stringify({}));
+        await store.set(COMPLETED_SEASONS_KEY, JSON.stringify([]));
+        await store.set(SEASON_NUMBER_KEY, JSON.stringify({ number: 1 }));
+        await store.set(ROSTER_KEY, JSON.stringify([]));
+        return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true, message: "All data reset" }) };
+      }
       return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
     }
 

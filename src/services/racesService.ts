@@ -128,5 +128,13 @@ export const racesService = {
       body: JSON.stringify({ roster }),
     });
     if (!response.ok) throw new Error('Failed to save roster');
+  },
+
+  async resetAll(): Promise<void> {
+    const response = await fetch(`${API_URL}/races/reset-all`, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) throw new Error('Failed to reset all data');
   }
 };

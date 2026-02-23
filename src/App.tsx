@@ -22,6 +22,7 @@ import { ScheduleList } from './components/ScheduleList';
 import { Toast } from './components/Toast';
 import { RaceResultsDrawer } from './components/RaceResultsDrawer';
 import { RacerRacesDrawer } from './components/RacerRacesDrawer';
+import { AdminPanel } from './components/AdminPanel';
 import { theme } from './theme';
 
 const LOADING_TRACK: Track = { id: '0', name: 'Loading', surface: 'asphalt', length: 1000, laps: 3 };
@@ -53,8 +54,16 @@ export default function App() {
   const [testRaceRacers, setTestRaceRacers] = useState<Racer[]>([]); // Racers for test race
   const [testRaceTrack, setTestRaceTrack] = useState<Track | null>(null); // Track for test race
   const isMobile = useIsMobile();
-  const { roster, schedule, standings, nextRace, completeRace, skipOverdueRace, tracks, completedSeasons, currentSeasonNumber } = useSeason();
+  const { roster, schedule, standings, nextRace, completeRace, skipOverdueRace, tracks, completedSeasons, currentSeasonNumber, resetSeason, loading } = useSeason();
   
+  // Auto-reset if there's any history (completed seasons or season > 1)
+  useEffect(() => {
+    if (!loading && (completedSeasons.length > 0 || currentSeasonNumber > 1)) {
+      console.log('🔄 Auto-resetting season - found history');
+      resetSeason();
+    }
+  }, [loading]);
+
   // Resolve actual historical season from completedSeasons if only id is provided
   const resolvedHistoricalSeason = useMemo(() => {
     if (!selectedHistoricalSeason) return null;
@@ -593,6 +602,7 @@ export default function App() {
                    { id: 'standings', title: 'Standings', onPress: () => navigate({ view: 'standings' }) },
                    { id: 'seasons', title: 'Seasons', onPress: () => navigate({ view: 'seasons' }) },
                    { id: 'tracks', title: 'Tracks', onPress: () => navigate({ view: 'tracks' }) },
+                   ...(process.env.NODE_ENV === 'development' ? [{ id: 'admin', title: '🔧 Admin', onPress: () => navigate({ view: 'admin' }) }] : []),
                 ]}
               />
            </>
@@ -616,29 +626,8 @@ export default function App() {
                     {timeLeft > 0 ? formatCountdown(timeLeft) : 'Starting...'}
                   </Text>
                 </>
-              )}
-              {DEBUG_SHOW_TEST_RACE && !isRacing && (
-                <TouchableOpacity
-                  onPress={startTestRace}
-                  style={{ marginTop: 16, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: theme.semantic.warning, borderRadius: 8 }}
-                >
-                  <Text style={{ color: '#000', fontWeight: 'bold' }}>🧪 Start Test Race</Text>
-                </TouchableOpacity>
-              )}
-              {DEBUG_SHOW_TEST_RACE && (activeRaceId || isRacing) && (
-                <TouchableOpacity
-                  onPress={killRace}
-                  style={{ marginTop: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: theme.semantic.error, borderRadius: 8 }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>🛑 Kill Race</Text>
-                </TouchableOpacity>
-              )}
-            {/* {isRacing && (
-               <Text className="text-2xl font-black mt-2 tracking-tight" style={{ color: theme.text.muted, fontSize: 24, fontWeight: '900', marginTop: 8, letterSpacing: -1 }}>
-                Racing!
-              </Text>
-            )} */}
-          </View>
+                  )}
+            </View>
 
           {/* Race Timer */}
           {isRacing && (
@@ -1249,6 +1238,17 @@ export default function App() {
             />
           </View>
         </View>
+      )}
+
+      {view === 'admin' && (
+        <AdminPanel
+          roster={roster}
+          tracks={tracks}
+          onStartTestRace={startTestRace}
+          onResetSeason={resetSeason}
+          onKillRace={killRace}
+          onBack={() => navigate({ view: 'race' })}
+        />
       )}
 
       {/* Toast notifications */}

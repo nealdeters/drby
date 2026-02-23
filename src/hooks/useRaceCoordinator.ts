@@ -269,6 +269,9 @@ export const useRaceCoordinator = ({
     }
 
     const checkAndTriggerRace = async () => {
+      // Add small random delay to reduce chance of race condition between multiple coordinators
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 100));
+      
       console.log('[Coordinator] Checking if race should be triggered:', raceId);
       try {
         const response = await fetch(`${API_URL}/race-manager?action=status&raceId=${raceId}`, {
@@ -279,6 +282,14 @@ export const useRaceCoordinator = ({
         if (response.ok) {
           const result = await response.json();
           console.log('[Coordinator] Race status check:', result);
+          
+          // Double-check: don't trigger if localStorage says this race was already triggered
+          const lastTriggered = localStorage.getItem(LAST_RACE_ID_KEY);
+          if (lastTriggered === raceId) {
+            console.log('[Coordinator] Race already triggered (localStorage check), skipping');
+            return;
+          }
+          
           if (!result.exists) {
             console.log('[Coordinator] Race not in progress, triggering...');
             localStorage.setItem(LAST_RACE_ID_KEY, raceId);
@@ -291,7 +302,12 @@ export const useRaceCoordinator = ({
         }
       } catch (err) {
         console.error('[Coordinator] Failed to check race status:', err);
-        triggerRace();
+        // On error, still try to trigger but check localStorage first
+        const lastTriggered = localStorage.getItem(LAST_RACE_ID_KEY);
+        if (lastTriggered !== raceId) {
+          localStorage.setItem(LAST_RACE_ID_KEY, raceId);
+          triggerRace();
+        }
       }
     };
 

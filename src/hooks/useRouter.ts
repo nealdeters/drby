@@ -9,7 +9,8 @@ export type ViewState =
   | 'seasons' 
   | 'historical-standings' 
   | 'historical-racer-profile' 
-  | 'tracks';
+  | 'tracks'
+  | 'admin';
 
 export interface RouterState {
   view: ViewState;
@@ -69,7 +70,7 @@ export const useRouter = () => {
     
     // Get the view from URL
     const view = params.get('view') as ViewState;
-    const validViews: ViewState[] = ['race', 'schedule', 'standings', 'profile', 'seasons', 'historical-standings', 'historical-racer-profile', 'tracks'];
+    const validViews: ViewState[] = ['race', 'schedule', 'standings', 'profile', 'seasons', 'historical-standings', 'historical-racer-profile', 'tracks', 'admin'];
     
     if (view && validViews.includes(view)) {
       newState.view = view;
@@ -126,7 +127,7 @@ export const useRouter = () => {
     let clearedState: Partial<RouterState> = {};
     
     if (newView && newView !== state.view) {
-      if (newView === 'standings' || newView === 'schedule' || newView === 'race' || newView === 'tracks' || newView === 'seasons') {
+      if (newView === 'standings' || newView === 'schedule' || newView === 'race' || newView === 'tracks' || newView === 'seasons' || newView === 'admin') {
         clearedState = {
           selectedRacerId: null,
           selectedHistoricalSeason: null,
