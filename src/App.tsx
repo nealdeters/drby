@@ -719,7 +719,7 @@ export default function App() {
               setShowResultsDrawer(true);
             }
           }}
-          onKillRace={killRace}
+          {...(process.env.NODE_ENV === 'development' && { onKillRace: killRace })}
         />
       )}
 
