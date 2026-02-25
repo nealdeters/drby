@@ -85,6 +85,11 @@ async function acquireLock(store: any, raceId: string): Promise<boolean> {
   } catch (err) {
     // Any error - lock not acquired
     console.error('❌ Failed to acquire lock:', err);
+    // If it's a Blobs error, we might want to retry
+    const errStr = String(err);
+    if (errStr.includes('401') || errStr.includes('BlobsInternalError')) {
+      console.log('🔄 Blobs auth error in lock acquisition, returning false (will retry on next invocation)');
+    }
     return false;
   }
 }
@@ -121,7 +126,21 @@ async function saveRaceState(store: any, state: RaceState): Promise<void> {
     console.log(`💾 Saved race state for ${state.raceId}, tick: ${state.tickCount}`);
   } catch (err) {
     console.error(`❌ Failed to save race state for ${state.raceId}:`, err);
-    throw err;
+    const errStr = String(err);
+    // If it's a Blobs auth error, try once more after a brief delay
+    if (errStr.includes('401') || errStr.includes('BlobsInternalError')) {
+      console.log('🔄 Retrying Blobs save after brief delay...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      try {
+        await store.set(getRaceStateKey(state.raceId), JSON.stringify(state));
+        console.log('✅ Retry save successful!');
+      } catch (retryErr) {
+        console.error('❌ Retry save also failed:', retryErr);
+        throw retryErr;
+      }
+    } else {
+      throw err;
+    }
   }
 }
 
@@ -428,13 +447,24 @@ export const handler: Handler = async (event: HandlerEvent) => {
     return { statusCode: 500, body: JSON.stringify({ error: "Ably API key not configured" }) };
   }
 
-  const siteId = process.env.NETLIFY_SITE_ID;
-  const token = process.env.NETLIFY_AUTH_TOKEN;
-  if (!siteId || !token) {
-    return { statusCode: 500, body: JSON.stringify({ error: "Server configuration error" }) };
+  const siteId = process.env.NETLIFY_SITE_ID || '';
+  const token = process.env.NETLIFY_AUTH_TOKEN || '';
+  
+  console.log('🔍 Blobs config:', { 
+    hasSiteId: !!siteId, 
+    hasToken: !!token,
+    siteIdPrefix: siteId ? siteId.substring(0, 8) + '...' : 'none'
+  });
+  
+  // Use explicit credentials if available, otherwise let Netlify handle it automatically
+  let store;
+  if (siteId && token) {
+    store = getStore('races', { siteID: siteId, token });
+    console.log('📦 Using blob store with explicit credentials');
+  } else {
+    store = getStore('races');
+    console.log('📦 Using blob store with default credentials');
   }
-
-  const store = getStore('races', { siteID: siteId, token });
 
   // Handle DELETE to stop/kill a race
   if (event.httpMethod === 'DELETE') {
@@ -554,6 +584,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
     const lockAcquired = await acquireLock(store, raceId);
     if (!lockAcquired) {
       console.log(`🔒 Race ${raceId} is locked, another invocation is running`);
+      // If lock fails due to Blobs error, try once more
       return {
         statusCode: 200,
         headers: { "Content-Type": "application/json" },
@@ -566,8 +597,23 @@ export const handler: Handler = async (event: HandlerEvent) => {
       existingState = await loadRaceState(store, raceId);
     } catch (err) {
       console.error('❌ Failed to load race state:', err);
-      await releaseLock(store, raceId);
-      return { statusCode: 500, body: JSON.stringify({ error: "Failed to load race state", details: String(err) }) };
+      const errStr = String(err);
+      // Check if it's a Blobs auth error - if so, try once more after a brief delay (cold start issue)
+      if (errStr.includes('401') || errStr.includes('BlobsInternalError')) {
+        console.log('🔄 Retrying Blobs load after brief delay...');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        try {
+          existingState = await loadRaceState(store, raceId);
+          console.log('✅ Retry successful!');
+        } catch (retryErr) {
+          console.error('❌ Retry also failed:', retryErr);
+          await releaseLock(store, raceId);
+          return { statusCode: 500, body: JSON.stringify({ error: "Failed to load race state (Blobs auth issue)", details: String(retryErr) }) };
+        }
+      } else {
+        await releaseLock(store, raceId);
+        return { statusCode: 500, body: JSON.stringify({ error: "Failed to load race state", details: String(err) }) };
+      }
     }
     
     if (!existingState) {
