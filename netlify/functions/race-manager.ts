@@ -62,12 +62,15 @@ async function acquireLock(store: any, raceId: string): Promise<boolean> {
         const lockAge = Date.now() - lockData.lockedAt;
         if (lockAge < LOCK_TTL_SECONDS * 1000) {
           // Lock is valid and not expired
+          console.log(`🔒 Lock exists for ${raceId}, age: ${lockAge}ms, not acquiring`);
           return false;
         }
         // Lock is stale - delete it and try to acquire
+        console.log(`🔓 Lock stale for ${raceId}, age: ${lockAge}ms, deleting`);
         await store.delete(lockKey);
       } catch {
         // If we can't parse it, treat as stale lock
+        console.log(`🔓 Lock unparseable for ${raceId}, deleting`);
         await store.delete(lockKey);
       }
     }
@@ -77,10 +80,11 @@ async function acquireLock(store: any, raceId: string): Promise<boolean> {
       lockedAt: Date.now(),
       raceId 
     }), { expiration: LOCK_TTL_SECONDS });
+    console.log(`🔐 Lock acquired for ${raceId}`);
     return true;
   } catch (err) {
     // Any error - lock not acquired
-    console.warn('Failed to acquire lock:', err);
+    console.error('❌ Failed to acquire lock:', err);
     return false;
   }
 }
@@ -89,6 +93,7 @@ async function releaseLock(store: any, raceId: string): Promise<void> {
   const lockKey = getRaceLockKey(raceId);
   try {
     await store.delete(lockKey);
+    console.log(`🔓 Lock released for ${raceId}`);
   } catch (err) {
     console.warn('Failed to release lock:', err);
   }
@@ -96,11 +101,28 @@ async function releaseLock(store: any, raceId: string): Promise<void> {
 
 async function loadRaceState(store: any, raceId: string): Promise<RaceState | null> {
   const data = await store.get(getRaceStateKey(raceId));
-  return data ? JSON.parse(String(data)) : null;
+  if (!data) {
+    console.log(`📭 No race state found for ${raceId}`);
+    return null;
+  }
+  try {
+    const state = JSON.parse(String(data));
+    console.log(`📂 Loaded race state for ${raceId}, tick: ${state.tickCount}, finished: ${state.isFinished}`);
+    return state;
+  } catch (err) {
+    console.error(`❌ Failed to parse race state for ${raceId}:`, err);
+    return null;
+  }
 }
 
 async function saveRaceState(store: any, state: RaceState): Promise<void> {
-  await store.set(getRaceStateKey(state.raceId), JSON.stringify(state));
+  try {
+    await store.set(getRaceStateKey(state.raceId), JSON.stringify(state));
+    console.log(`💾 Saved race state for ${state.raceId}, tick: ${state.tickCount}`);
+  } catch (err) {
+    console.error(`❌ Failed to save race state for ${state.raceId}:`, err);
+    throw err;
+  }
 }
 
 async function deleteRaceState(store: any, raceId: string): Promise<void> {
@@ -526,6 +548,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   // Check if this is a continuation request
   if (isContinuation) {
+    console.log(`🔄 Processing continuation request for race ${raceId}`);
+    
     // Try to acquire lock - only one invocation should run at a time
     const lockAcquired = await acquireLock(store, raceId);
     if (!lockAcquired) {
@@ -537,9 +561,18 @@ export const handler: Handler = async (event: HandlerEvent) => {
       };
     }
 
-    const existingState = await loadRaceState(store, raceId);
+    let existingState;
+    try {
+      existingState = await loadRaceState(store, raceId);
+    } catch (err) {
+      console.error('❌ Failed to load race state:', err);
+      await releaseLock(store, raceId);
+      return { statusCode: 500, body: JSON.stringify({ error: "Failed to load race state", details: String(err) }) };
+    }
+    
     if (!existingState) {
       await releaseLock(store, raceId);
+      console.log(`❌ Race state not found for ${raceId}`);
       return { statusCode: 404, body: JSON.stringify({ error: "Race state not found" }) };
     }
     
@@ -554,7 +587,14 @@ export const handler: Handler = async (event: HandlerEvent) => {
       };
     }
 
-    const result = await continueRace(ablyApiKey, existingState, store, siteId, token, true);
+    let result;
+    try {
+      result = await continueRace(ablyApiKey, existingState, store, siteId, token, true);
+    } catch (err) {
+      console.error('❌ Error in continueRace:', err);
+      await releaseLock(store, raceId);
+      return { statusCode: 500, body: JSON.stringify({ error: "Error continuing race", details: String(err) }) };
+    }
     
     // Release lock after race finishes or times out
     if (!result.shouldContinue) {
