@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, PanResponder, Animated, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, PanResponder, Animated } from 'react-native';
 import { Racer } from '../gameTypes';
 import { theme } from '../theme';
 
@@ -10,6 +10,24 @@ interface RaceResultsDrawerProps {
   onClose: () => void;
   onRacerClick?: (racerId: string) => void;
 }
+
+const getPositionColor = (position: number) => {
+  switch (position) {
+    case 1: return '#FFD700';
+    case 2: return '#C0C0C0';
+    case 3: return '#CD7F32';
+    default: return theme.text.secondary;
+  }
+};
+
+const getPositionEmoji = (position: number) => {
+  switch (position) {
+    case 1: return '🥇';
+    case 2: return '🥈';
+    case 3: return '🥉';
+    default: return `${position}`;
+  }
+};
 
 export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
   visible,
@@ -51,6 +69,8 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
 
   if (!visible) return null;
 
+  const hasResults = results.some(r => r.finishTime);
+
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
     const seconds = Math.floor((ms % 60000) / 1000);
@@ -59,24 +79,6 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
       return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
     }
     return `${seconds}.${milliseconds.toString().padStart(3, '0')}s`;
-  };
-
-  const getPositionColor = (position: number) => {
-    switch (position) {
-      case 1: return '#FFD700';
-      case 2: return '#C0C0C0';
-      case 3: return '#CD7F32';
-      default: return theme.text.secondary;
-    }
-  };
-
-  const getPositionEmoji = (position: number) => {
-    switch (position) {
-      case 1: return '🥇';
-      case 2: return '🥈';
-      case 3: return '🥉';
-      default: return `${position}`;
-    }
   };
 
   return (
@@ -103,7 +105,7 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
       {/* Header */}
       <View style={{ paddingHorizontal: 20, paddingBottom: 16 }}>
         <Text style={{ fontSize: 24, fontWeight: '900', color: theme.text.primary, letterSpacing: -0.5 }}>
-          {results.some(r => r.finishTime) ? 'Race Results' : 'Expected Racers'}
+          {hasResults ? 'Race Results' : 'Expected Racers'}
         </Text>
         {trackName && (
           <Text style={{ fontSize: 14, color: theme.text.secondary, marginTop: 4 }}>
@@ -139,10 +141,10 @@ export const RaceResultsDrawer: React.FC<RaceResultsDrawerProps> = ({
           >
             {/* Position */}
             <View style={{ width: 40, alignItems: 'center' }}>
-              {index < 3 ? (
+              {index < 3 && hasResults ? (
                 <Text style={{ fontSize: 24 }}>{getPositionEmoji(index + 1)}</Text>
               ) : (
-                <Text style={{ fontSize: 18, fontWeight: '700', color: getPositionColor(index + 1) }}>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: hasResults ? getPositionColor(index + 1) : theme.text.secondary }}>
                   {index + 1}
                 </Text>
               )}
