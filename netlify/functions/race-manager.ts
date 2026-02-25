@@ -127,7 +127,7 @@ async function continueRace(
   const ably = new Ably.Rest(ablyApiKey);
   const channel = ably.channels.get(`race:${raceId}`);
   const updateInterval = 20;
-  const maxDuration = 24000; // 24 seconds per invocation
+  const maxDuration = 22000; // 22 seconds per invocation - leave 4 seconds for continuation
   const startTime = state.startTime;
   const raceStartTime = Date.now();
   let elapsed = state.tickCount * updateInterval;
@@ -343,6 +343,9 @@ async function continueRace(
     state.lastContinuationTick = state.tickCount;
     console.log(`🔄 Race ${raceId} continuing, elapsed: ${elapsed}ms, ticks: ${state.tickCount}`);
 
+    // Save state BEFORE triggering continuation (in case we timeout)
+    await saveRaceState(store, state);
+
     // Publish to Ably for coordinator
     const controlChannel = ably.channels.get(`race:${raceId}:control`);
 
@@ -357,14 +360,16 @@ async function continueRace(
       console.error('Failed to publish continuation:', err);
     }
 
-    // Trigger continuation via HTTP (reliable server-side continuation)
+    // Trigger continuation via HTTP (fire and forget - don't await)
+    // This ensures the function returns quickly and doesn't timeout
     const functionUrl = process.env.URL
       ? `https://${process.env.URL}/.netlify/functions/race-manager`
       : null;
 
     if (functionUrl) {
-      try {
-        await fetch(functionUrl, {
+      // Use setTimeout to ensure this doesn't block the function return
+      setTimeout(() => {
+        fetch(functionUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -374,11 +379,10 @@ async function continueRace(
             raceId,
             continue: true
           })
-        });
-        console.log(`📡 HTTP triggered continuation for race ${raceId}`);
-      } catch (err) {
-        console.error('Failed to HTTP trigger continuation:', err);
-      }
+        }).then(() => console.log(`📡 HTTP continuation triggered for ${raceId}`))
+          .catch(err => console.error('Failed HTTP continuation:', err));
+      }, 100);
+      console.log(`📡 Scheduled HTTP continuation for race ${raceId}`);
     } else {
       console.log(`📡 Skipping HTTP trigger in local dev`);
     }
