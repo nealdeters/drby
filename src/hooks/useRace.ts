@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { SharedValue, makeMutable, withTiming } from 'react-native-reanimated';
 import { Racer, Track } from '../gameTypes';
-import { getRaceChannel, getAblyClient, API_URL, headers } from '../services/apiClient';
+import { getRaceChannel, getAblyClient } from '../services/apiClient';
 
 interface UseRaceProps {
   racers: Racer[];
@@ -20,28 +20,24 @@ interface RaceUpdate {
   progressMap?: Record<string, number>;
 }
 
-// Validate race update to prevent stale data
 const validateRaceUpdate = (update: RaceUpdate, currentRaceId: string): boolean => {
   const now = Date.now();
   const isValidRaceId = update.raceId === currentRaceId;
-  const isRecent = (now - update.timestamp) < 180000; // Reject updates older than 3 minutes
+  const isRecent = (now - update.timestamp) < 180000;
   
   return isValidRaceId && isRecent;
 };
 
 export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFinish }: UseRaceProps) => {
-  // React State for the UI List (throttled updates)
   const [racers, setRacers] = useState<Racer[]>([]);
   const [isRacing, setIsRacing] = useState(false);
   const [raceStartTime, setRaceStartTime] = useState<number | null>(null);
   
-  // Refs for tracking
   const racersRef = useRef<Racer[]>([]);
   const lastStateUpdate = useRef(0);
   const isSubscribed = useRef(false);
   const currentRaceId = useRef<string>('');
 
-  // Reanimated Shared Values for UI (Map of ID -> Progress)
   const progressMap = useMemo(() => {
     const map: Record<string, SharedValue<number>> = {};
     inputRacers.forEach(r => {
@@ -50,7 +46,6 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     return map;
   }, [inputRacers]);
 
-  // Cleanup function
   const cleanup = useCallback(() => {
     if (currentRaceId.current && isSubscribed.current) {
       try {
@@ -58,7 +53,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
         if (client) {
           const channel = client.channels.get(`race:${currentRaceId.current}`);
           channel.unsubscribe('race-update');
-          console.log(`🧹 Cleaned up race subscription for ${currentRaceId.current}`);
+          console.log(`Cleaned up race subscription for ${currentRaceId.current}`);
         }
       } catch (err) {
         console.error('Error during cleanup:', err);
@@ -67,9 +62,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     }
   }, []);
 
-  // Subscribe to Ably channel when race becomes active
   useEffect(() => {
-    // Cleanup previous subscription if raceId changes
     if (currentRaceId.current && currentRaceId.current !== raceId) {
       cleanup();
     }
@@ -79,7 +72,6 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
       return;
     }
 
-    // Prevent duplicate subscriptions
     if (isSubscribed.current && currentRaceId.current === raceId) {
       return;
     }
@@ -89,78 +81,18 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
       currentRaceId.current = raceId;
       isSubscribed.current = true;
 
-      console.log(`📡 Subscribing to race: ${raceId}`);
-
-      const checkExistingRace = async () => {
-        try {
-          const response = await fetch(`${API_URL}/race-manager?action=status&raceId=${raceId}`, {
-            method: 'GET',
-            headers,
-          });
-          
-          if (response.ok) {
-            const result = await response.json();
-            if (result.exists) {
-              if (!result.isFinished) {
-                console.log('[useRace] Race in progress, syncing...');
-                setIsRacing(true);
-                if (result.startTime) {
-                  setRaceStartTime(result.startTime);
-                }
-              } else {
-                console.log('[useRace] Race already finished, fetching results...');
-                setIsRacing(false);
-                // Fetch final results from storage
-                try {
-                  const resultsResponse = await fetch(`${API_URL}/races?raceId=${raceId}`, {
-                    method: 'GET',
-                    headers,
-                  });
-                  if (resultsResponse.ok) {
-                    const raceData = await resultsResponse.json();
-                    let results: any[] = [];
-                    if (raceData.racers && raceData.racers.length > 0) {
-                      setRacers(raceData.racers);
-                      results = raceData.racers;
-                      console.log('[useRace] Loaded final results:', raceData.racers.map((r: any) => r.name));
-                    } else if (raceData.results) {
-                      // Fallback: use results array directly if no racers populated
-                      console.log('[useRace] Using raw results:', raceData.results);
-                      results = raceData.results;
-                    }
-                    // Trigger onRaceFinish to advance to next race
-                    if (results.length > 0 && onRaceFinish) {
-                      console.log('[useRace] Triggering onRaceFinish for late-joining client');
-                      onRaceFinish(results);
-                    }
-                  }
-                } catch (err) {
-                  console.warn('[useRace] Failed to fetch results:', err);
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('[useRace] Failed to check race status:', err);
-        }
-      };
-      
-      checkExistingRace();
+      console.log(`Subscribing to race: ${raceId}`);
 
       channel.subscribe('race-update', (message: any) => {
         const update = message.data as RaceUpdate;
         const now = Date.now();
         
-        console.log('📨 Received race-update:', update.type, 'raceId:', update.raceId, 'currentId:', raceId, 'timestamp:', update.timestamp, 'age:', now - update.timestamp, 'ms');
-        
-        // Validate race update to prevent stale data
         if (!validateRaceUpdate(update, raceId)) {
-          console.warn(`Invalid race update rejected for race ${raceId}:`, update);
+          console.warn(`Invalid race update rejected for race ${raceId}`);
           return;
         }
         
         if (update.type === 'started') {
-          console.log('🚀 Race started - setting isRacing=true, racers:', update.racers?.map(r => r.name));
           setIsRacing(true);
           if (update.timestamp) {
             setRaceStartTime(update.timestamp);
@@ -171,9 +103,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
             lastStateUpdate.current = now;
           }
         } else if (update.type === 'progress') {
-          console.log('📊 Progress update:', update.progressMap);
           if (update.progressMap) {
-            // Update shared values for smooth animation
             Object.entries(update.progressMap).forEach(([racerId, progress]) => {
               if (progressMap[racerId]) {
                 progressMap[racerId].value = withTiming(progress, { duration: 33 });
@@ -182,25 +112,22 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
           }
           
           if (update.racers) {
-            // Preserve lane assignments to prevent lane switching
             const updatedRacers = update.racers.map(updatedRacer => {
               const currentRacer = racersRef.current.find(r => r.id === updatedRacer.id);
               return {
                 ...updatedRacer,
-                lane: currentRacer?.lane ?? updatedRacer.lane // Preserve existing lane assignment
+                lane: currentRacer?.lane ?? updatedRacer.lane
               };
             });
             
             racersRef.current = updatedRacers;
             
-            // Throttle React state updates to every 100ms for smoother UI updates
             if (now - lastStateUpdate.current > 100) {
               setRacers(updatedRacers);
               lastStateUpdate.current = now;
             }
           }
         } else if (update.type === 'finished') {
-          console.log('🏁 Race finished');
           setIsRacing(false);
           setRaceStartTime(null);
           if (update.results) {
@@ -208,7 +135,6 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
             setRacers(update.results);
             onRaceFinish?.(update.results);
           }
-          // Clean up subscription after race finishes
           cleanup();
         }
       });
@@ -222,11 +148,10 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     }
   }, [isActive, raceId, progressMap, onRaceFinish, cleanup]);
 
-  // Reset state when input racers change (new race)
   useEffect(() => {
     const newRacers = inputRacers.map((r, index) => ({
       ...r,
-      lane: r.lane ?? Math.min(index + 1, 8), // Lane 1-N (1-based indexing), max 8 lanes
+      lane: r.lane ?? Math.min(index + 1, 8),
       progress: 0,
       totalDistance: 0,
       laps: 0,
@@ -240,13 +165,11 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     setRaceStartTime(null);
     lastStateUpdate.current = 0;
     
-    // Reset shared values
     Object.keys(progressMap).forEach(key => {
       progressMap[key].value = 0;
     });
   }, [inputRacers, track, progressMap]);
 
-  // Cleanup on unmount and when race finishes
   useEffect(() => {
     if (!isRacing && currentRaceId.current) {
       cleanup();
@@ -254,25 +177,11 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     }
   }, [isRacing, cleanup]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       cleanup();
     };
   }, [cleanup]);
 
-  const startRace = useCallback(() => {
-    console.log('Race will start automatically via server');
-  }, []);
-
-  const stopRace = useCallback(() => {
-    console.log('Race will finish automatically via server');
-  }, []);
-
-  // Debug: log when isRacing changes
-  useEffect(() => {
-    console.log('🔍 useRace state change: isRacing=', isRacing, 'racers.length=', racers.length, 'racers:', racers.map(r => `${r.name}:${r.status}`));
-  }, [isRacing, racers]);
-
-  return { racers, isRacing, raceStartTime, startRace, stopRace, progressMap };
+  return { racers, isRacing, raceStartTime, progressMap };
 };

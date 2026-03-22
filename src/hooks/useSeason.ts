@@ -3,9 +3,6 @@ import { Racer, RaceEvent, Track } from '../gameTypes';
 import { racersService } from '../services/racersService';
 import { tracksService } from '../services/tracksService';
 import { racesService } from '../services/racesService';
-import { getRacerStats } from '../utils/stats';
-
-const STORAGE_KEY = 'season-schedule';
 
 export interface RacerSeasonStats {
   id: string;
@@ -51,24 +48,16 @@ export const useSeason = () => {
   const [loading, setLoading] = useState(true);
   const [completedSeasons, setCompletedSeasons] = useState<CompletedSeason[]>([]);
   const [currentSeasonNumber, setCurrentSeasonNumber] = useState(1);
-  const [isTransitioning, setIsTransitioning] = useState(false);
   const [initialRosterLoaded, setInitialRosterLoaded] = useState(false);
 
-  // Initialize Season / Schedule
   useEffect(() => {
     const initData = async () => {
       try {
-        // Try to load roster from races service first (has health/stats)
-        // Fall back to racers service if no saved roster
-        let fetchedRacers = await racesService.getRoster().catch(() => null);
-        if (!fetchedRacers || fetchedRacers.length === 0) {
-          fetchedRacers = await racersService.getAll();
-        }
-        
-        const [fetchedTracks, savedSchedule, savedStandings, savedSeasons, savedSeasonNum] = await Promise.all([
-          tracksService.getAll(),
-          racesService.getSeasonSchedule().catch(() => null),
-          racesService.getStandings().catch(() => null),
+        const [fetchedRacers, fetchedTracks, savedSchedule, savedStandings, savedSeasons, savedSeasonNum] = await Promise.all([
+          racersService.getAll().catch(() => []),
+          tracksService.getAll().catch(() => []),
+          racesService.getSeasonSchedule().catch(() => []),
+          racesService.getStandings().catch(() => ({})),
           racesService.getCompletedSeasons().catch(() => []),
           racesService.getCurrentSeasonNumber().catch(() => 1)
         ]);
@@ -77,80 +66,25 @@ export const useSeason = () => {
         setTracks(fetchedTracks);
         setCompletedSeasons(savedSeasons || []);
         
-        // Handle season number - could be number or { number: number }
-        let seasonNum = 1;
-        if (typeof savedSeasonNum === 'number') {
-          seasonNum = savedSeasonNum;
-        } else if (savedSeasonNum && typeof savedSeasonNum === 'object' && 'number' in savedSeasonNum) {
-          seasonNum = (savedSeasonNum as any).number || 1;
-        }
+        const seasonNum = typeof savedSeasonNum === 'number' 
+          ? savedSeasonNum 
+          : (savedSeasonNum as any)?.number || 1;
         setCurrentSeasonNumber(seasonNum);
-        
-        // Debug: Check the structure of loaded seasons
-        if (savedSeasons && savedSeasons.length > 0) {
-          console.log('📊 Loaded', savedSeasons.length, 'completed seasons');
-          savedSeasons.forEach((season, index) => {
-            console.log(`📊 Season ${season.number}: racerStats=${season.racerStats?.length}, winner=${season.winner?.name}, totalRaces=${season.totalRaces}`);
-          });
-        }
-        
-        // Init standings - use saved if available, otherwise all zeros
+
         const initialStandings: Record<string, number> = {};
+        const savedStandingsObj = savedStandings as Record<string, number>;
         fetchedRacers.forEach(r => {
-          initialStandings[r.id] = savedStandings?.[r.id] || 0;
+          initialStandings[r.id] = savedStandingsObj?.[r.id] || 0;
         });
         setStandings(initialStandings);
-        console.log('🏆 Loaded standings:', initialStandings);
 
-        // Check if we have a saved schedule that's still valid
         if (savedSchedule && savedSchedule.length > 0) {
-          // Check if all races are completed - if so, start new season immediately
-          const allCompleted = savedSchedule.every(r => r.completed);
-          if (allCompleted) {
-            console.log('📅 Saved schedule has all races completed, starting new season immediately...');
-            console.log('📊 Current standings before reset:', savedStandings);
-            // Start new season immediately with fetched data
-            await startNewSeasonFromInit(fetchedRacers, fetchedTracks, savedSeasons || [], savedSeasonNum || 1, savedStandings);
-          } else {
-            // Restore saved schedule and standings (normal case for active season)
-            setSchedule(savedSchedule);
-            const next = savedSchedule.find(r => !r.completed);
-            setNextRace(next || null);
-            console.log('📅 Restored saved schedule with', savedSchedule.length, 'races');
-            console.log('📊 Loaded existing standings:', savedStandings);
-
-            // Auto-skip any races that are more than 5 minutes overdue
-            const now = Date.now();
-            const overdueRaces = savedSchedule.filter(r => 
-              !r.completed && r.startTime < now - (5 * 60 * 1000)
-            );
-            if (overdueRaces.length > 0) {
-              console.log('⏭️ Auto-skipping', overdueRaces.length, 'overdue races');
-              const updated = savedSchedule.map(r => {
-                if (overdueRaces.some(or => or.id === r.id)) {
-                  return { ...r, completed: true, results: [] };
-                }
-                return r;
-              });
-              setSchedule(updated);
-              const newNext = updated.find(r => !r.completed);
-              setNextRace(newNext || null);
-            }
-          }
-        } else {
-          // Generate new schedule for fresh season
-          console.log('🆕 No saved schedule found, generating new season...');
-          // Reset standings for completely new season
-          const resetStandings: Record<string, number> = {};
-          fetchedRacers.forEach(r => {
-            resetStandings[r.id] = 0;
-          });
-          setStandings(resetStandings);
-          await racesService.saveStandings(resetStandings);
-          const newSchedule = await generateSchedule(fetchedRacers, fetchedTracks);
-          setSchedule(newSchedule);
-          const next = newSchedule.find(r => !r.completed);
+          setSchedule(savedSchedule);
+          const next = savedSchedule.find(r => !r.completed);
           setNextRace(next || null);
+        } else {
+          setSchedule([]);
+          setNextRace(null);
         }
       } catch (error) {
         console.error("Failed to initialize season data", error);
@@ -163,7 +97,6 @@ export const useSeason = () => {
     initData();
   }, []);
 
-  // Save schedule to Blobs whenever it changes
   useEffect(() => {
     if (schedule.length > 0) {
       racesService.saveSeasonSchedule(schedule).catch(err => 
@@ -172,7 +105,6 @@ export const useSeason = () => {
     }
   }, [schedule]);
 
-  // Save standings to Blobs whenever they change
   useEffect(() => {
     if (Object.keys(standings).length > 0) {
       racesService.saveStandings(standings).catch(err => 
@@ -181,7 +113,6 @@ export const useSeason = () => {
     }
   }, [standings]);
 
-  // Save roster to Blobs whenever it changes (after initial load)
   useEffect(() => {
     if (initialRosterLoaded && roster.length > 0) {
       racesService.saveRoster(roster).catch(err => 
@@ -190,329 +121,29 @@ export const useSeason = () => {
     }
   }, [roster, initialRosterLoaded]);
 
-  const generateSchedule = async (currentRacer: Racer[], currentTracks: Track[], seasonNum: number = currentSeasonNumber) => {
-    const newSchedule: RaceEvent[] = [];
-    const now = Date.now();
-    const seasonPrefix = `s${seasonNum}`;
-    
-    // Find the next 10-minute boundary (0, 10, 20, 30, 40, or 50 minutes)
-    const date = new Date(now);
-    const currentMinutes = date.getMinutes();
-    const currentSeconds = date.getSeconds();
-    const currentMillis = date.getMilliseconds();
-    
-    // Calculate next 10-minute boundary
-    let nextMinute = Math.ceil(currentMinutes / 10) * 10;
-    let nextHour = date.getHours();
-    
-    if (nextMinute >= 60) {
-      nextMinute = 0;
-      nextHour = (nextHour + 1) % 24;
-    }
-    
-    // Set start time to next 10-minute boundary
-    const startTime = new Date(date);
-    startTime.setHours(nextHour, nextMinute, 0, 0);
-    let baseTime = startTime.getTime();
-    
-    // If the calculated time is in the past (shouldn't happen, but safety check), add 10 minutes
-    if (baseTime <= now) {
-      baseTime = now + (10 * 60 * 1000);
-    }
-    
-    // 1-Week Season: 1008 races, 10 minutes apart (6 races per hour)
-    // Schedule: Continuous 7-day cycle starting at next 10-minute boundary
-    for (let i = 0; i < 1008; i++) {
-      // Pick 4-6 random racers for better competition
-      const numRacers = 4 + Math.floor(Math.random() * 3); // 4-6 racers
-      const shuffled = [...currentRacer].sort(() => 0.5 - Math.random());
-      const selectedIds = shuffled.slice(0, numRacers).map(r => r.id);
+  const refreshFromServer = useCallback(async () => {
+    const [savedSchedule, savedStandings, savedSeasons, savedSeasonNum] = await Promise.all([
+      racesService.getSeasonSchedule().catch(() => []),
+      racesService.getStandings().catch(() => ({})),
+      racesService.getCompletedSeasons().catch(() => []),
+      racesService.getCurrentSeasonNumber().catch(() => 1)
+    ]);
 
-      newSchedule.push({
-        id: `${seasonPrefix}-race-${i}-${now}`,
-        startTime: baseTime + (i * 10 * 60 * 1000), // 10-minute intervals from boundary
-        seed: Math.floor(Math.random() * 1000000),
-        track: currentTracks[i % currentTracks.length],
-        racerIds: selectedIds,
-        completed: false,
-      });
-    }
-    return newSchedule;
-  };
+    setSchedule(savedSchedule || []);
+    setCompletedSeasons(savedSeasons || []);
+    
+    const seasonNum = typeof savedSeasonNum === 'number' 
+      ? savedSeasonNum 
+      : (savedSeasonNum as any)?.number || 1;
+    setCurrentSeasonNumber(seasonNum);
 
-  const startNewSeasonFromInit = async (
-    currentRoster: Racer[], 
-    currentTracks: Track[], 
-    savedSeasons: CompletedSeason[], 
-    seasonNum: number,
-    savedStandings: Record<string, number> | null
-  ) => {
-    console.log('🏁 Starting new season from initialization...');
-    
-    // Prevent concurrent season transitions
-    if (isTransitioning) {
-      console.log('⚠️ Season transition already in progress, skipping...');
-      return;
-    }
-    
-    setIsTransitioning(true);
-    
-    try {
-      // Save current season to completed seasons if there are standings
-      if (savedStandings && Object.keys(savedStandings).length > 0) {
-        const winner = Object.entries(savedStandings)
-          .sort(([, a], [, b]) => b - a)[0];
-        
-        if (winner) {
-          const winnerRacer = currentRoster.find(r => r.id === winner[0]);
-          if (winnerRacer) {
-            // Calculate stats for all racers
-            const racerStats: RacerSeasonStats[] = currentRoster.map(racer => {
-              const stats = getRacerStats(racer.id, currentRoster, schedule);
-              return {
-                id: racer.id,
-                name: racer.name,
-                color: racer.color,
-                baseSpeed: racer.baseSpeed,
-                health: racer.health,
-                strategy: racer.strategy,
-                trackPreference: racer.trackPreference,
-                acceleration: racer.acceleration || 50,
-                endurance: racer.endurance || 50,
-                consistency: racer.consistency || 50,
-                staminaRecovery: racer.staminaRecovery || 50,
-                points: savedStandings[racer.id] || 0,
-                first: stats?.first || 0,
-                second: stats?.second || 0,
-                third: stats?.third || 0,
-                racesRun: stats?.racesRun || 0
-              };
-            });
+    setStandings(savedStandings || {});
 
-            const completedSeason: CompletedSeason = {
-              id: `season-${seasonNum}-${Date.now()}`,
-              number: seasonNum,
-              completedAt: new Date().toISOString(),
-              winner: {
-                id: winnerRacer.id,
-                name: winnerRacer.name,
-                color: winnerRacer.color,
-                points: winner[1]
-              },
-              totalRaces: schedule.filter(r => r.completed).length,
-              finalStandings: { ...savedStandings },
-              racerStats,
-              races: schedule.filter(r => r.completed)
-            };
-            
-          const updatedSeasons = [...savedSeasons, completedSeason];
-          setCompletedSeasons(updatedSeasons);
-          console.log('🏆 Saving completed season with racerStats:', completedSeason.racerStats?.length, 'racers');
-          await racesService.saveCompletedSeasons(updatedSeasons);
-          console.log('🏆 Saved completed season from init:', completedSeason);
-          }
-        }
-      }
-      
-      // Increment season number
-      const newSeasonNumber = seasonNum + 1;
-      setCurrentSeasonNumber(newSeasonNumber);
-      await racesService.saveCurrentSeasonNumber(newSeasonNumber);
-      
-      // Reset standings for new season
-      const resetStandings: Record<string, number> = {};
-      currentRoster.forEach(r => {
-        resetStandings[r.id] = 0;
-      });
-      setStandings(resetStandings);
-      await racesService.saveStandings(resetStandings);
-      
-      // Reset racer health for new season (fresh start)
-      setRoster(prev => prev.map(r => ({ ...r, health: 100 })));
-      
-      // Generate new schedule
-      const newSchedule = await generateSchedule(currentRoster, currentTracks, newSeasonNumber);
-      setSchedule(newSchedule);
-      await racesService.saveSeasonSchedule(newSchedule);
-      
-      console.log('✅ New season started from init:', newSeasonNumber);
-    } catch (error) {
-      console.error('❌ Error starting new season from init:', error);
-    } finally {
-      setIsTransitioning(false);
-    }
-  };
-
-  const startNewSeason = useCallback(async () => {
-    console.log('🏁 Starting new season...');
-    
-    // Prevent concurrent season transitions
-    if (isTransitioning) {
-      console.log('⚠️ Season transition already in progress, skipping...');
-      return;
-    }
-    
-    setIsTransitioning(true);
-    
-    try {
-      // Save current season to completed seasons if there were races
-      if (schedule.length > 0 && schedule.some(r => r.completed)) {
-      const winner = Object.entries(standings)
-        .sort(([, a], [, b]) => b - a)[0];
-      
-      if (winner) {
-        const winnerRacer = roster.find(r => r.id === winner[0]);
-        if (winnerRacer) {
-          // Calculate stats for all racers
-          const racerStats: RacerSeasonStats[] = roster.map(racer => {
-            const stats = getRacerStats(racer.id, roster, schedule);
-            return {
-              id: racer.id,
-              name: racer.name,
-              color: racer.color,
-              baseSpeed: racer.baseSpeed,
-              health: racer.health,
-              strategy: racer.strategy,
-              trackPreference: racer.trackPreference,
-              acceleration: racer.acceleration || 50,
-              endurance: racer.endurance || 50,
-              consistency: racer.consistency || 50,
-              staminaRecovery: racer.staminaRecovery || 50,
-              points: standings[racer.id] || 0,
-              first: stats?.first || 0,
-              second: stats?.second || 0,
-              third: stats?.third || 0,
-              racesRun: stats?.racesRun || 0
-            };
-          });
-
-          const completedSeason: CompletedSeason = {
-            id: `season-${currentSeasonNumber}-${Date.now()}`,
-            number: currentSeasonNumber,
-            completedAt: new Date().toISOString(),
-            winner: {
-              id: winnerRacer.id,
-              name: winnerRacer.name,
-              color: winnerRacer.color,
-              points: winner[1]
-            },
-            totalRaces: schedule.filter(r => r.completed).length,
-            finalStandings: { ...standings },
-            racerStats,
-            races: schedule.filter(r => r.completed)
-          };
-          
-          const updatedSeasons = [...completedSeasons, completedSeason];
-          setCompletedSeasons(updatedSeasons);
-          await racesService.saveCompletedSeasons(updatedSeasons);
-          console.log('🏆 Saved completed season:', completedSeason.number, 'with', completedSeason.racerStats?.length, 'racers');
-        }
-      }
-    }
-    
-    // Increment season number
-    const newSeasonNumber = currentSeasonNumber + 1;
-    setCurrentSeasonNumber(newSeasonNumber);
-    await racesService.saveCurrentSeasonNumber(newSeasonNumber);
-    
-    // Reset standings for new season
-    const resetStandings: Record<string, number> = {};
-    roster.forEach(r => {
-      resetStandings[r.id] = 0;
-    });
-    setStandings(resetStandings);
-    
-    // Reset racer health for new season (fresh start)
-    setRoster(prev => prev.map(r => ({ ...r, health: 100 })));
-    
-    // Clear schedule and generate new one
-    setSchedule([]);
-    await racesService.saveSeasonSchedule([]);
-    
-    // Generate new schedule
-    const newSchedule = await generateSchedule(roster, tracks);
-    setSchedule(newSchedule);
-    await racesService.saveSeasonSchedule(newSchedule);
-    
-    console.log('✅ New season started:', newSeasonNumber);
-    } catch (error) {
-      console.error('❌ Error starting new season:', error);
-    } finally {
-      setIsTransitioning(false);
-    }
-  }, [schedule, standings, roster, currentSeasonNumber, completedSeasons, tracks, isTransitioning]);
-
-  const resetSeason = useCallback(async () => {
-    console.log('🔄 Resetting all season data...');
-    
-    if (isTransitioning) {
-      console.log('⚠️ Season transition already in progress, skipping...');
-      return;
-    }
-    
-    setIsTransitioning(true);
-    
-    try {
-      // Clear all data on backend
-      await racesService.resetAll();
-      
-      // Reset state
-      setCompletedSeasons([]);
-      setCurrentSeasonNumber(1);
-      setStandings({});
-      
-      // Get fresh racers with full health
-      const freshRacers = await racersService.getAll();
-      setRoster(freshRacers);
-      
-      // Generate new schedule starting at next 0/10/20/30/40/50 minute
-      const newSchedule = await generateSchedule(freshRacers, tracks, 1);
-      setSchedule(newSchedule);
-      const next = newSchedule.find(r => !r.completed);
-      setNextRace(next || null);
-      
-      console.log('✅ Season reset complete');
-    } catch (error) {
-      console.error('❌ Error resetting season:', error);
-    } finally {
-      setIsTransitioning(false);
-    }
-  }, [isTransitioning, tracks]);
-
-  // Check if all races are completed and start new season
-  useEffect(() => {
-    if (schedule.length > 0 && schedule.every(r => r.completed) && roster.length > 0 && tracks.length > 0) {
-      console.log('🎯 All races completed! Auto-starting new season...');
-      startNewSeason();
-    }
-  }, [schedule, roster.length, tracks.length, startNewSeason]);
-
-  const skipOverdueRace = useCallback((raceId: string) => {
-    console.log('⏭️ Skipping overdue race:', raceId);
-    
-    setSchedule(prev => {
-      const idx = prev.findIndex(r => r.id === raceId);
-      if (idx === -1) return prev;
-      
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], completed: true, results: [] };
-      
-      // Set next race - find next upcoming race by scheduled time
-      const now = Date.now();
-      const nextUpcoming = updated
-        .filter(r => !r.completed && r.startTime > now)
-        .sort((a, b) => a.startTime - b.startTime)[0];
-      
-      setNextRace(nextUpcoming || null);
-      
-      return updated;
-    });
+    const next = (savedSchedule || []).find(r => !r.completed);
+    setNextRace(next || null);
   }, []);
 
   const completeRace = useCallback((raceId: string, results: Racer[]) => {
-    console.log('🏁 Completing race:', raceId);
-    console.log('📊 Race results:', results.map((r, i) => `${i + 1}. ${r.name} (${r.id}) finishTime: ${r.finishTime}`));
-    
     setSchedule(prev => {
       const idx = prev.findIndex(r => r.id === raceId);
       if (idx === -1) return prev;
@@ -524,7 +155,6 @@ export const useSeason = () => {
       }, {} as Record<string, number>);
       updated[idx] = { ...updated[idx], completed: true, results: results.map(r => r.id), finishTimes };
       
-      // Set next race - find next upcoming race by scheduled time
       const now = Date.now();
       const nextUpcoming = updated
         .filter(r => !r.completed && r.startTime > now)
@@ -534,55 +164,40 @@ export const useSeason = () => {
       
       return updated;
     });
-
-    // Update Standings (5, 3, 1 points)
-    setStandings(prev => {
-      const newStandings = { ...prev };
-      if (results[0]) {
-        newStandings[results[0].id] = (newStandings[results[0].id] || 0) + 5;
-        console.log(`🥇 Added 5 points to ${results[0].name}, total: ${newStandings[results[0].id]}`);
-      }
-      if (results[1]) {
-        newStandings[results[1].id] = (newStandings[results[1].id] || 0) + 3;
-        console.log(`🥈 Added 3 points to ${results[1].name}, total: ${newStandings[results[1].id]}`);
-      }
-      if (results[2]) {
-        newStandings[results[2].id] = (newStandings[results[2].id] || 0) + 1;
-        console.log(`🥉 Added 1 point to ${results[2].name}, total: ${newStandings[results[2].id]}`);
-      }
-      console.log('📊 Updated standings:', newStandings);
-      return newStandings;
-    });
-
-    // Update Roster Health/Stats - strategy affects fatigue
-    setRoster(prev => prev.map(r => {
-      const raceResult = results.find(res => res.id === r.id);
-      if (raceResult) {
-        // Health reduction based on strategy - aggressive tires faster, conservative endures longer
-        const fatigueRates = {
-          aggressive: 8 + Math.random() * 4,   // 8-12 health lost
-          balanced: 5 + Math.random() * 3,     // 5-8 health lost  
-          conservative: 3 + Math.random() * 2  // 3-5 health lost
-        };
-        let newHealth = r.health - (fatigueRates[r.strategy] || fatigueRates.balanced);
-        if (raceResult.status === 'injured') newHealth -= 25;
-        return { ...r, health: Math.max(0, newHealth) };
-      } else {
-        // Recover health if they rested - based on staminaRecovery attribute
-        // staminaRecovery 0-100 maps to 3-15 health recovered
-        const recoveryRate = 3 + (r.staminaRecovery || 50) / 100 * 12;
-        const healthRecovered = recoveryRate + Math.random() * 3;
-        return { ...r, health: Math.min(100, r.health + healthRecovered) };
-      }
-    }));
   }, []);
 
-  // Calculate historical standings from all completed seasons
-  const getHistoricalStandings = (): Record<string, { totalPoints: number; seasonsWon: number; bestFinish: number; racesWon: number }> => {
+  const skipOverdueRace = useCallback((raceId: string) => {
+    setSchedule(prev => {
+      const idx = prev.findIndex(r => r.id === raceId);
+      if (idx === -1) return prev;
+      
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], completed: true, results: [] };
+      
+      const now = Date.now();
+      const nextUpcoming = updated
+        .filter(r => !r.completed && r.startTime > now)
+        .sort((a, b) => a.startTime - b.startTime)[0];
+      
+      setNextRace(nextUpcoming || null);
+      
+      return updated;
+    });
+  }, []);
+
+  const resetSeason = useCallback(async () => {
+    await racesService.resetAll();
+    setCompletedSeasons([]);
+    setCurrentSeasonNumber(1);
+    setStandings({});
+    setSchedule([]);
+    setNextRace(null);
+  }, []);
+
+  const getHistoricalStandings = useCallback((): Record<string, { totalPoints: number; seasonsWon: number; bestFinish: number; racesWon: number }> => {
     const historical: Record<string, { totalPoints: number; seasonsWon: number; bestFinish: number; racesWon: number }> = {};
     
     completedSeasons.forEach(season => {
-      // Count season wins
       if (season.winner) {
         if (!historical[season.winner.id]) {
           historical[season.winner.id] = { totalPoints: 0, seasonsWon: 0, bestFinish: 999, racesWon: 0 };
@@ -590,21 +205,18 @@ export const useSeason = () => {
         historical[season.winner.id].seasonsWon++;
       }
       
-      // Accumulate total points and track best finishes
       Object.entries(season.finalStandings).forEach(([racerId, points]) => {
         if (!historical[racerId]) {
           historical[racerId] = { totalPoints: 0, seasonsWon: 0, bestFinish: 999, racesWon: 0 };
         }
         historical[racerId].totalPoints += points;
         
-        // Track best finish position (lower is better)
         const finishPosition = Object.keys(season.finalStandings)
           .sort((a, b) => season.finalStandings[b] - season.finalStandings[a])
           .indexOf(racerId) + 1;
         historical[racerId].bestFinish = Math.min(historical[racerId].bestFinish, finishPosition);
       });
       
-      // Count race wins from racer stats
       season.racerStats?.forEach(racerStat => {
         if (!historical[racerStat.id]) {
           historical[racerStat.id] = { totalPoints: 0, seasonsWon: 0, bestFinish: 999, racesWon: 0 };
@@ -614,7 +226,21 @@ export const useSeason = () => {
     });
     
     return historical;
-  };
+  }, [completedSeasons]);
 
-  return { roster, schedule, standings, nextRace, completeRace, skipOverdueRace, tracks, loading, completedSeasons, currentSeasonNumber, getHistoricalStandings, resetSeason };
+  return { 
+    roster, 
+    schedule, 
+    standings, 
+    nextRace, 
+    completeRace, 
+    skipOverdueRace, 
+    tracks, 
+    loading, 
+    completedSeasons, 
+    currentSeasonNumber, 
+    getHistoricalStandings, 
+    resetSeason,
+    refreshFromServer
+  };
 };

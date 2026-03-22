@@ -12,14 +12,10 @@
   targetPort = 5173
   autoLaunch = false
   publish = "dist"
-  # This forces the internal server to bind specifically to IPv4
   host = "127.0.0.1"
 
 [functions]
   directory = "netlify/functions"
-
-[functions.scheduled-race-trigger]
-  schedule = "* * * * *"
 
 [[redirects]]
   from = "/api/races"
