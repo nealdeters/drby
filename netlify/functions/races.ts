@@ -135,15 +135,13 @@ export const handler: Handler = async (event: HandlerEvent) => {
       return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
     }
 
-    // Handle reset-all endpoint - clears all data
     if (isResetRequest) {
       if (method === 'POST') {
         await store.set(SCHEDULE_KEY, JSON.stringify([]));
         await store.set(STANDINGS_KEY, JSON.stringify({}));
         await store.set(COMPLETED_SEASONS_KEY, JSON.stringify([]));
         await store.set(SEASON_NUMBER_KEY, JSON.stringify({ number: 1 }));
-        await store.set(ROSTER_KEY, JSON.stringify([]));
-        return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true, message: "All data reset" }) };
+        return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ success: true, message: "Season data reset, roster preserved" }) };
       }
       return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
     }
