@@ -184,17 +184,21 @@ export const RacerProfile = ({ stats, currentSeasonPoints, currentSeasonNumber, 
         
         // Add current season
         if (schedule.length > 0) {
-          const racesRun = schedule.filter(r => r.completed && r.results?.includes(stats.id)).length;
-          const wins = schedule.filter(r => r.completed && r.results?.[0] === stats.id).length;
-          const seconds = schedule.filter(r => r.completed && r.results?.[1] === stats.id).length;
-          const thirds = schedule.filter(r => r.completed && r.results?.[2] === stats.id).length;
+          const currentSeasonRaces = schedule.filter(r => 
+            r.completed && r.id && r.id.startsWith(`s${currentSeasonNumber}-`)
+          );
           
-          // Calculate current season position
+          const racesRun = currentSeasonRaces.filter(r => r.results?.includes(stats.id)).length;
+          const wins = currentSeasonRaces.filter(r => r.results?.[0] === stats.id).length;
+          const seconds = currentSeasonRaces.filter(r => r.results?.[1] === stats.id).length;
+          const thirds = currentSeasonRaces.filter(r => r.results?.[2] === stats.id).length;
+          
+          // Calculate current season position - only from current season races
           const currentStandings: { id: string; points: number }[] = [];
           roster.forEach((r: any) => {
-            const rWins = schedule.filter(ev => ev.completed && ev.results?.[0] === r.id).length;
-            const rSeconds = schedule.filter(ev => ev.completed && ev.results?.[1] === r.id).length;
-            const rThirds = schedule.filter(ev => ev.completed && ev.results?.[2] === r.id).length;
+            const rWins = currentSeasonRaces.filter(ev => ev.results?.[0] === r.id).length;
+            const rSeconds = currentSeasonRaces.filter(ev => ev.results?.[1] === r.id).length;
+            const rThirds = currentSeasonRaces.filter(ev => ev.results?.[2] === r.id).length;
             const points = rWins * 5 + rSeconds * 3 + rThirds;
             currentStandings.push({ id: r.id, points });
           });

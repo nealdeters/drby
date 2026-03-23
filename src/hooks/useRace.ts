@@ -70,14 +70,21 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
       return;
     }
 
-    if (isSubscribed.current && currentRaceId.current === raceId) {
-      return;
-    }
-
     const client = getAblyClient();
     if (!client) {
       console.error('[useRace] Ably client not available');
       return;
+    }
+
+    const shouldReconnect = isSubscribed.current && currentRaceId.current === raceId && client.connection.state !== 'connected';
+    
+    if (isSubscribed.current && currentRaceId.current === raceId && !shouldReconnect) {
+      return;
+    }
+
+    if (shouldReconnect) {
+      console.log('[useRace] Ably disconnected, forcing re-subscription');
+      cleanup();
     }
 
     const setupSubscription = () => {

@@ -1,11 +1,16 @@
 import { Racer, RaceEvent } from '../gameTypes';
 
-export const getRacerStats = (racerId: string, roster: Racer[], schedule: RaceEvent[]) => {
+export const getRacerStats = (racerId: string, roster: Racer[], schedule: RaceEvent[], currentSeasonNumber?: number) => {
   const racer = roster.find(r => r.id === racerId);
   if (!racer) return null;
 
+  const seasonPrefix = currentSeasonNumber ? `s${currentSeasonNumber}-` : null;
+  const filteredSchedule = seasonPrefix 
+    ? schedule.filter(e => e.id?.startsWith(seasonPrefix))
+    : schedule;
+
   let first = 0, second = 0, third = 0, racesRun = 0;
-  schedule.forEach(event => {
+  filteredSchedule.forEach(event => {
     if (event.completed && event.results) {
       if (event.results.includes(racerId)) {
         racesRun++;

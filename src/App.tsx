@@ -351,7 +351,7 @@ export default function App() {
                   .map(racer => ({ 
                     racer, 
                     points: standings[racer.id] || 0,
-                    stats: getRacerStats(racer.id, roster, schedule) || { first: 0, second: 0, third: 0, racesRun: 0 }
+                    stats: getRacerStats(racer.id, roster, schedule, currentSeasonNumber) || { first: 0, second: 0, third: 0, racesRun: 0 }
                   }))
                   .sort((a, b) => b.points - a.points)}
                 renderItem={({ item, index }) => (
