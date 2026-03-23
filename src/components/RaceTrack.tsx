@@ -183,14 +183,17 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
           strokeWidth={2}
         />
         
-        {/* Start/Finish Line - positioned at the top of the track, spanning from inner to outer edge */}
+        {/* Start/Finish Line - vertical line at top of track, from infield to outer edge */}
         <G>
-           {/* Main finish line spanning track width */}
-           <Line x1={CX - S_LEN / 2} y1={CY - (R_BASE + 70)} x2={CX + S_LEN / 2} y2={CY - (R_BASE + 70)} stroke="rgba(255,255,255,0.5)" strokeWidth={8} strokeDasharray="12,12" />
-           {/* Inner post */}
-           <Rect x={CX - S_LEN / 2 - 4} y={CY - (R_BASE + 70) - 4} width={8} height={8} fill="#ffffff" />
-           {/* Outer post */}
-           <Rect x={CX + S_LEN / 2 - 4} y={CY - (R_BASE + 70) - 4} width={8} height={8} fill="#ffffff" />
+           {/* Solid white line from infield (R=60) to outer track edge (R=220) */}
+           <Line 
+             x1={CX} 
+             y1={CY - 60} 
+             x2={CX} 
+             y2={CY - 220} 
+             stroke="#ffffff" 
+             strokeWidth={6} 
+           />
         </G>
 
         {/* Racers */}
