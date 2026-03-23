@@ -23,7 +23,7 @@ interface RaceUpdate {
 const validateRaceUpdate = (update: RaceUpdate, currentRaceId: string): boolean => {
   const now = Date.now();
   const isValidRaceId = update.raceId === currentRaceId;
-  const isRecent = (now - update.timestamp) < 180000;
+  const isRecent = (now - update.timestamp) < 60000;
   
   return isValidRaceId && isRecent;
 };
@@ -103,6 +103,13 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
             lastStateUpdate.current = now;
           }
         } else if (update.type === 'progress') {
+          if (!isRacing) {
+            setIsRacing(true);
+            if (update.timestamp) {
+              setRaceStartTime(update.timestamp);
+            }
+          }
+          
           if (update.progressMap) {
             Object.entries(update.progressMap).forEach(([racerId, progress]) => {
               if (progressMap[racerId]) {
