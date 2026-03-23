@@ -71,7 +71,7 @@ export default function App() {
   const displayTrack = nextRace?.track || LOADING_TRACK;
   const displayIsActive = !!(nextRace && !nextRace.completed);
 
-  const { racers, isRacing, raceStartTime, progressMap } = useRace({
+  const { racers, isRacing, raceStartTime, raceElapsedTime, progressMap } = useRace({
     racers: currentRaceRacers,
     track: displayTrack,
     raceId: displayRaceId,
@@ -93,7 +93,6 @@ export default function App() {
   }, [racers, isRacing]);
 
   const [timeLeft, setTimeLeft] = useState(0);
-  const [raceElapsedTime, setRaceElapsedTime] = useState(0);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showResultsDrawer, setShowResultsDrawer] = useState(false);
@@ -101,24 +100,6 @@ export default function App() {
   const [resultsTrackName, setResultsTrackName] = useState<string | undefined>();
   const [showRacerRacesDrawer, setShowRacerRacesDrawer] = useState(false);
   const [racerRacesSchedule, setRacerRacesSchedule] = useState<RaceEvent[]>([]);
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    
-    if (isRacing) {
-      if (raceStartTime) {
-        interval = setInterval(() => {
-          setRaceElapsedTime(Date.now() - raceStartTime);
-        }, 100);
-      }
-    } else {
-      setRaceElapsedTime(0);
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isRacing, raceStartTime]);
 
   useEffect(() => {
     if (!nextRace || nextRace.completed) {
@@ -248,6 +229,9 @@ export default function App() {
               if (a.status !== 'finished' && b.status === 'finished') return 1;
               if (a.status === 'injured' && b.status !== 'injured') return 1;
               if (a.status !== 'injured' && b.status === 'injured') return -1;
+              if (a.status === 'finished' && b.status === 'finished') {
+                return (a.finishTime ?? Infinity) - (b.finishTime ?? Infinity);
+              }
               if (a.totalDistance !== b.totalDistance) {
                 return b.totalDistance - a.totalDistance;
               }

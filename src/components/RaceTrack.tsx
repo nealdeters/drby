@@ -26,18 +26,21 @@ const S_LEN = 200; // Length of the straightaways
 const RacerDot = ({ racer, progress, laneIndex, totalLanes, totalLaps }: { racer: Racer; progress: SharedValue<number>; laneIndex: number; totalLanes: number; totalLaps: number }) => {
   if (!progress) return null;
 
-  // Each racer gets their own lane with proper spacing
-  // Distribute lanes evenly across the track width
-  const laneSpacing = 18; // Pixels between lane centers
+  // Lane calculation: lanes are distributed around the center of the track width
+  const laneSpacing = 18;
   const laneOffset = (laneIndex - (totalLanes - 1) / 2) * laneSpacing;
-  const R = R_BASE + 70 + laneOffset; // Start from inner track edge
+  // Inner lane edge is at R_BASE + 70, lanes spread outward from there
+  const R = R_BASE + 70 + laneOffset;
   const S = S_LEN;
   const singleLapPathLen = 2 * S + 2 * Math.PI * R;
 
   const animatedProps = useAnimatedProps(() => {
+    // Clamp progress to valid range [0, 1] to prevent racers going off-track
+    const clampedProgress = Math.max(0, Math.min(1, progress.value));
+    
     // progress.value is total race progress (0-1)
     // Calculate which "virtual lap" we're on (can exceed total laps during final lap)
-    const virtualLapNumber = progress.value * totalLaps;
+    const virtualLapNumber = clampedProgress * totalLaps;
     const currentLapDistance = (virtualLapNumber % 1) * singleLapPathLen;
     
     let x = CX;
@@ -69,7 +72,7 @@ const RacerDot = ({ racer, progress, laneIndex, totalLanes, totalLaps }: { racer
       x = (CX + S / 2) + R * Math.cos(angle);
       y = CY + R * Math.sin(angle);
     }
-    // 5. Top Straight (Right half)
+    // 5. Top Straight (Right half) - Finish line
     else {
       const dStr = currentLapDistance - (S / 2 + 2 * Math.PI * R + S);
       x = (CX + S / 2) - dStr;
@@ -172,7 +175,7 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
           );
         })}
 
-        {/* Inner Field (Grass) */}
+        {/* Inner Field (Grass) - rendered first so racers appear on top */}
         <Path
           d={getStadiumPath(-10)}
           fill="#4A895C"
@@ -180,26 +183,32 @@ export const RaceTrack: React.FC<RaceTrackProps> = ({ racers, track, progressMap
           strokeWidth={2}
         />
         
-        {/* Start/Finish Line */}
-        <G transform={`rotate(0, ${CX}, ${CY})`}>
-           {/* Checkered Line */}
-           <Line x1={CX} y1={CY - R_BASE + 10} x2={CX} y2={CY - R_BASE - 150} stroke="rgba(255,255,255,0.5)" strokeWidth={4} strokeDasharray="4,4" />
-           {/* Finish Post */}
-           <Rect x={CX - 2} y={CY - R_BASE - 150} width={4} height={160} fill="#ffffff" />
-           <Circle cx={CX} cy={CY - R_BASE - 150} r={6} fill="#ffffff" />
+        {/* Start/Finish Line - positioned at the top of the track, spanning from inner to outer edge */}
+        <G>
+           {/* Main finish line spanning track width */}
+           <Line x1={CX - S_LEN / 2} y1={CY - (R_BASE + 70)} x2={CX + S_LEN / 2} y2={CY - (R_BASE + 70)} stroke="rgba(255,255,255,0.5)" strokeWidth={8} strokeDasharray="12,12" />
+           {/* Inner post */}
+           <Rect x={CX - S_LEN / 2 - 4} y={CY - (R_BASE + 70) - 4} width={8} height={8} fill="#ffffff" />
+           {/* Outer post */}
+           <Rect x={CX + S_LEN / 2 - 4} y={CY - (R_BASE + 70) - 4} width={8} height={8} fill="#ffffff" />
         </G>
 
         {/* Racers */}
-        {racers.map((racer) => (
-          <RacerDot 
-            key={racer.id} 
-            racer={racer} 
-            progress={progressMap[racer.id]}
-            laneIndex={racer.lane - 1} // Convert 1-based lane to 0-based index for calculations
-            totalLanes={Math.max(8, racers.length)}
-            totalLaps={track.laps}
-          />
-        ))}
+        {racers.map((racer, index) => {
+          const effectiveLane = racer.lane ?? index + 1;
+          const effectiveTotalLanes = Math.max(8, racers.length);
+          const laneIndex = effectiveLane - 1;
+          return (
+            <RacerDot 
+              key={racer.id} 
+              racer={racer} 
+              progress={progressMap[racer.id]}
+              laneIndex={laneIndex}
+              totalLanes={effectiveTotalLanes}
+              totalLaps={track.laps}
+            />
+          );
+        })}
       </Svg>
     </View>
   );

@@ -15,23 +15,21 @@ interface RaceUpdate {
   type: 'progress' | 'finished' | 'started';
   raceId: string;
   timestamp: number;
+  elapsed: number;
   racers?: Racer[];
   results?: Racer[];
   progressMap?: Record<string, number>;
 }
 
 const validateRaceUpdate = (update: RaceUpdate, currentRaceId: string): boolean => {
-  const now = Date.now();
-  const isValidRaceId = update.raceId === currentRaceId;
-  const isRecent = (now - update.timestamp) < 60000;
-  
-  return isValidRaceId && isRecent;
+  return update.raceId === currentRaceId;
 };
 
 export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFinish }: UseRaceProps) => {
   const [racers, setRacers] = useState<Racer[]>([]);
   const [isRacing, setIsRacing] = useState(false);
   const [raceStartTime, setRaceStartTime] = useState<number | null>(null);
+  const [raceElapsedTime, setRaceElapsedTime] = useState(0);
   
   const racersRef = useRef<Racer[]>([]);
   const lastStateUpdate = useRef(0);
@@ -76,83 +74,109 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
       return;
     }
 
-    try {
-      const channel = getRaceChannel(raceId);
-      currentRaceId.current = raceId;
-      isSubscribed.current = true;
+    const client = getAblyClient();
+    if (!client) {
+      console.error('[useRace] Ably client not available');
+      return;
+    }
 
-      console.log(`Subscribing to race: ${raceId}`);
+    const setupSubscription = () => {
+      try {
+        const channel = getRaceChannel(raceId);
+        currentRaceId.current = raceId;
+        isSubscribed.current = true;
 
-      channel.subscribe('race-update', (message: any) => {
-        const update = message.data as RaceUpdate;
-        const now = Date.now();
-        
-        if (!validateRaceUpdate(update, raceId)) {
-          console.warn(`Invalid race update rejected for race ${raceId}`);
-          return;
-        }
-        
-        if (update.type === 'started') {
-          setIsRacing(true);
-          if (update.timestamp) {
-            setRaceStartTime(update.timestamp);
+        console.log(`Subscribing to race: ${raceId}`);
+
+        channel.subscribe('race-update', (message: any) => {
+          const update = message.data as RaceUpdate;
+          const now = Date.now();
+          
+          if (!validateRaceUpdate(update, raceId)) {
+            console.warn(`Invalid race update rejected for race ${raceId}`);
+            return;
           }
-          if (update.racers) {
-            racersRef.current = update.racers;
-            setRacers(update.racers);
-            lastStateUpdate.current = now;
-          }
-        } else if (update.type === 'progress') {
-          if (!isRacing) {
+          
+          if (update.type === 'started') {
             setIsRacing(true);
-            if (update.timestamp) {
-              setRaceStartTime(update.timestamp);
+            if (update.elapsed !== undefined) {
+              setRaceStartTime(Date.now() - update.elapsed);
             }
-          }
-          
-          if (update.progressMap) {
-            Object.entries(update.progressMap).forEach(([racerId, progress]) => {
-              if (progressMap[racerId]) {
-                progressMap[racerId].value = withTiming(progress, { duration: 33 });
-              }
-            });
-          }
-          
-          if (update.racers) {
-            const updatedRacers = update.racers.map(updatedRacer => {
-              const currentRacer = racersRef.current.find(r => r.id === updatedRacer.id);
-              return {
-                ...updatedRacer,
-                lane: currentRacer?.lane ?? updatedRacer.lane
-              };
-            });
-            
-            racersRef.current = updatedRacers;
-            
-            if (now - lastStateUpdate.current > 100) {
-              setRacers(updatedRacers);
+            if (update.racers) {
+              racersRef.current = update.racers;
+              setRacers(update.racers);
               lastStateUpdate.current = now;
             }
+          } else if (update.type === 'progress') {
+            if (!isRacing) {
+              setIsRacing(true);
+              if (update.elapsed !== undefined) {
+                setRaceStartTime(Date.now() - update.elapsed);
+              }
+            }
+            
+            if (update.elapsed !== undefined) {
+              setRaceElapsedTime(update.elapsed);
+            }
+            
+            if (update.progressMap) {
+              Object.entries(update.progressMap).forEach(([racerId, progress]) => {
+              if (progressMap[racerId]) {
+                progressMap[racerId].value = withTiming(progress, { duration: 20 });
+              }
+              });
+            }
+            
+            if (update.racers) {
+              const updatedRacers = update.racers.map(updatedRacer => {
+                const currentRacer = racersRef.current.find(r => r.id === updatedRacer.id);
+                return {
+                  ...updatedRacer,
+                  lane: currentRacer?.lane ?? updatedRacer.lane
+                };
+              });
+              
+              racersRef.current = updatedRacers;
+              
+              if (now - lastStateUpdate.current > 100) {
+                setRacers(updatedRacers);
+                lastStateUpdate.current = now;
+              }
+            }
+          } else if (update.type === 'finished') {
+            setIsRacing(false);
+            setRaceStartTime(null);
+            if (update.elapsed !== undefined) {
+              setRaceElapsedTime(update.elapsed);
+            }
+            if (update.results) {
+              racersRef.current = update.results;
+              setRacers(update.results);
+              onRaceFinish?.(update.results);
+            }
+            cleanup();
           }
-        } else if (update.type === 'finished') {
-          setIsRacing(false);
-          setRaceStartTime(null);
-          if (update.results) {
-            racersRef.current = update.results;
-            setRacers(update.results);
-            onRaceFinish?.(update.results);
-          }
-          cleanup();
-        }
-      });
+        });
+      } catch (error) {
+        console.error('Failed to subscribe to Ably channel:', error);
+        isSubscribed.current = false;
+      }
+    };
 
-      return () => {
-        cleanup();
+    if (client.connection.state === 'connected') {
+      setupSubscription();
+    } else {
+      const onConnect = () => {
+        console.log('[useRace] Ably connected, setting up subscription');
+        setupSubscription();
+        client.connection.off('connected', onConnect);
       };
-    } catch (error) {
-      console.error('Failed to subscribe to Ably channel:', error);
-      isSubscribed.current = false;
+      client.connection.on('connected', onConnect);
     }
+
+    return () => {
+      cleanup();
+    };
   }, [isActive, raceId, progressMap, onRaceFinish, cleanup]);
 
   useEffect(() => {
@@ -170,6 +194,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     setRacers(newRacers);
     setIsRacing(false);
     setRaceStartTime(null);
+    setRaceElapsedTime(0);
     lastStateUpdate.current = 0;
     
     Object.keys(progressMap).forEach(key => {
@@ -190,5 +215,5 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
     };
   }, [cleanup]);
 
-  return { racers, isRacing, raceStartTime, progressMap };
+  return { racers, isRacing, raceStartTime, raceElapsedTime, progressMap };
 };
