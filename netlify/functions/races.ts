@@ -155,8 +155,15 @@ export const handler: Handler = async (event: HandlerEvent) => {
           try {
             const seasonNumData = await store.get(SEASON_NUMBER_KEY);
             if (seasonNumData) {
-              const parsed = JSON.parse(String(seasonNumData));
-              currentSeasonNumber = parsed.number || 1;
+              const raw = String(seasonNumData).trim();
+              const parsed = JSON.parse(raw);
+              if (typeof parsed === 'number' && Number.isFinite(parsed)) {
+                currentSeasonNumber = parsed;
+              } else if (typeof parsed === 'string' && /^\d+$/.test(parsed)) {
+                currentSeasonNumber = Number(parsed);
+              } else if (parsed && typeof parsed === 'object' && Number.isFinite(Number(parsed.number))) {
+                currentSeasonNumber = Number(parsed.number);
+              }
             }
           } catch (err) {
             console.log('Could not get current season number, defaulting to 1');
