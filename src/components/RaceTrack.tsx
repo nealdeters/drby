@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View } from 'react-native';
 import Svg, { Path, Circle, G, Rect, Line } from 'react-native-svg';
-import Animated, { useAnimatedProps, SharedValue } from 'react-native-reanimated';
+import Animated, { useAnimatedProps, useSharedValue, withTiming, SharedValue } from 'react-native-reanimated';
 import { Racer, Track } from '../gameTypes';
 
 // Create Animated components for Reanimated
@@ -24,17 +24,27 @@ const R_BASE = 70; // Radius of the turns
 const S_LEN = 200; // Length of the straightaways
 
 const RacerDot = ({ racer, progress, laneIndex, totalLanes, totalLaps }: { racer: Racer; progress: SharedValue<number>; laneIndex: number; totalLanes: number; totalLaps: number }) => {
+  const initialLanePosition = racer.lanePosition ?? racer.laneTarget ?? laneIndex + 1;
+  const lateralPosition = useSharedValue(initialLanePosition);
+
+  // The server sends a continuous lanePosition while a move is underway. The
+  // short client blend absorbs 50ms bus cadence without ever snapping a horse
+  // to a new radius when a packet arrives.
+  useEffect(() => {
+    const target = racer.lanePosition ?? racer.laneTarget ?? laneIndex + 1;
+    lateralPosition.value = withTiming(target, { duration: 90 });
+  }, [racer.lanePosition, racer.laneTarget, racer.lane, laneIndex, lateralPosition]);
+
   if (!progress) return null;
 
-  // Lane calculation: lanes are distributed around the center of the track width
-  const laneSpacing = 18;
-  const laneOffset = (laneIndex - (totalLanes - 1) / 2) * laneSpacing;
-  // Inner lane edge is at R_BASE + 70, lanes spread outward from there
-  const R = R_BASE + 70 + laneOffset;
-  const S = S_LEN;
-  const singleLapPathLen = 2 * S + 2 * Math.PI * R;
-
   const animatedProps = useAnimatedProps(() => {
+    // Lane calculation is deliberately inside the worklet: lateralPosition is
+    // continuous, so the radius and path length change during the move.
+    const laneSpacing = 18;
+    const laneOffset = (lateralPosition.value - 1 - (totalLanes - 1) / 2) * laneSpacing;
+    const R = R_BASE + 70 + laneOffset;
+    const S = S_LEN;
+    const singleLapPathLen = 2 * S + 2 * Math.PI * R;
     // Clamp progress to valid range [0, 1] to prevent racers going off-track
     const clampedProgress = Math.max(0, Math.min(1, progress.value));
     
