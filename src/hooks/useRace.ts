@@ -28,6 +28,37 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
   const racersRef = useRef<Racer[]>([]);
   const isRacingRef = useRef(false);
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
+  const lastLaneDecisionTick = useRef<Record<string, number>>({});
+
+  const recordLaneDebug = useCallback((nextRacers: Racer[]) => {
+    const debugEnabled = typeof globalThis !== 'undefined' && Boolean((globalThis as { __DRBY_RACE_DEBUG__?: boolean }).__DRBY_RACE_DEBUG__);
+    if (!debugEnabled) return;
+    nextRacers.forEach((racer) => {
+      const decision = racer.laneDecision;
+      if (!decision || lastLaneDecisionTick.current[racer.id] === decision.evaluatedAtTick) return;
+      lastLaneDecisionTick.current[racer.id] = decision.evaluatedAtTick;
+      const event = {
+        horse: racer.name,
+        horseId: racer.id,
+        currentLane: decision.currentLane,
+        targetLane: decision.targetLane,
+        reason: decision.reason,
+        blockerId: decision.blockerId ?? null,
+        targetSpaceAvailable: decision.targetSpaceAvailable,
+        nearbyHorses: decision.nearbyHorses,
+        scores: decision.scores,
+        lanePosition: racer.lanePosition,
+        laneChange: racer.laneChange ?? null,
+        tick: decision.evaluatedAtTick,
+      };
+      console.debug('[DRBY lane decision]', event);
+      if (typeof window !== 'undefined') {
+        const traceWindow = window as Window & { __DRBY_LANE_TRACE__?: unknown[] };
+        traceWindow.__DRBY_LANE_TRACE__ ??= [];
+        traceWindow.__DRBY_LANE_TRACE__!.push(event);
+      }
+    });
+  }, []);
 
   const progressMap = useMemo(() => {
     const map: Record<string, SharedValue<number>> = {};
@@ -58,7 +89,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
             isRacingRef.current = true;
             setIsRacing(true);
             setRaceStartTime(Date.now() - (update.elapsed ?? 0));
-            if (update.racers) { racersRef.current = update.racers; setRacers(update.racers); }
+            if (update.racers) { recordLaneDebug(update.racers); racersRef.current = update.racers; setRacers(update.racers); }
           } else if (update.type === 'progress') {
             if (!isRacingRef.current) {
               isRacingRef.current = true;
@@ -72,6 +103,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
             if (update.racers) {
               const next = update.racers.map(r => ({ ...r, lane: r.lane ?? racersRef.current.find(c => c.id === r.id)?.lane }));
               racersRef.current = next;
+              recordLaneDebug(next);
               setRacers(next);
             }
           } else if (update.type === 'finished') {
@@ -94,7 +126,7 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
       console.warn('[useRace] realtime subscribe failed', error);
     }
     return cleanup;
-  }, [isActive, raceId, progressMap, onRaceFinish, cleanup]);
+  }, [isActive, raceId, progressMap, onRaceFinish, cleanup, recordLaneDebug]);
 
   useEffect(() => {
     const next = inputRacers.map((r, index) => ({
