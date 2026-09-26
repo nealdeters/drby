@@ -21,7 +21,8 @@ export interface Racer {
   lane: number;
   progress: number; // 0-1 (current lap fraction)
   laps: number; // completed laps
-  totalDistance: number; // meters
+  totalDistance: number; // meters along the selected racing line
+  travelDistance?: number; // physical meters, including outer-lane distance
   status: RacerStatus;
   currentSpeed: number;
   finishTime?: number; // ms
