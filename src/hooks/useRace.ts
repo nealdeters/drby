@@ -139,7 +139,9 @@ export const useRace = ({ racers: inputRacers, track, raceId, isActive, onRaceFi
                 const currentRacer = racersRef.current.find(r => r.id === updatedRacer.id);
                 return {
                   ...updatedRacer,
-                  lane: currentRacer?.lane ?? updatedRacer.lane
+                  // Lane changes are part of the race state. Keep the prior
+                  // lane only for legacy updates that omit it.
+                  lane: updatedRacer.lane ?? currentRacer?.lane
                 };
               });
               
